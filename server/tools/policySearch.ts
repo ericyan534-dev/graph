@@ -29,7 +29,7 @@ const MAX_HITS = Number.parseInt(
   10
 );
 const MIN_RELEVANCE = Number.parseFloat(
-  process.env.POLICY_SEARCH_MIN_RELEVANCE ?? "0.45"
+  process.env.POLICY_SEARCH_MIN_RELEVANCE ?? "0.35"
 );
 const MAX_PAGES = Number.parseInt(
   process.env.CONGRESS_MAX_PAGES ?? "6",
@@ -185,6 +185,9 @@ const HIGH_SIGNAL_SHORT_TOKENS = new Set(
     "tax",
   ].map((token) => token.toLowerCase())
 );
+
+const isHighSignalToken = (token: string) =>
+  token.length >= 4 || /\d/.test(token) || HIGH_SIGNAL_SHORT_TOKENS.has(token);
 
 const BILL_PATTERN = /(?:(\d{3})[a-zA-Z]{0,2}\s*)?(h\.?r\.|s\.|s\.?j\.?res\.|h\.?j\.?res\.|s\.?con\.?res\.|h\.?con\.?res\.|s\.?res\.|h\.?res\.)\s*(\d{1,4})/i;
 
@@ -666,6 +669,18 @@ export const policySearchTool = async ({
   query,
   filters,
 }: SearchInput): Promise<PolicySearchHit[]> => {
+  const queryTokensRaw = tokenize(query);
+  const keywordTokensRaw = (filters?.keywords ?? []).flatMap((keyword) =>
+    tokenize(keyword)
+  );
+  const hasSignalTokens =
+    queryTokensRaw.some(isHighSignalToken) ||
+    keywordTokensRaw.some(isHighSignalToken);
+
+  if (!hasSignalTokens) {
+    return [];
+  }
+
   if (filters?.billId) {
     const locator = parseBillId(filters.billId);
     if (locator) {
@@ -706,10 +721,8 @@ export const policySearchTool = async ({
     }
   }
 
-  const queryTokens = buildTokenIndex(tokenize(query));
-  const keywordTokens = buildTokenIndex(
-    (filters?.keywords ?? []).flatMap((keyword) => tokenize(keyword))
-  );
+  const queryTokens = buildTokenIndex(queryTokensRaw);
+  const keywordTokens = buildTokenIndex(keywordTokensRaw);
 
   const scored = aggregated
     .map((hit) => {
