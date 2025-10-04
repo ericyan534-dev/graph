@@ -79,6 +79,7 @@ export type PolicyDNAResult = {
       name?: string;
       party?: string;
       state?: string;
+      bioguideId?: string;
     };
     summary?: string;
     congress?: number;

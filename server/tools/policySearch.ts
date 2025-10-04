@@ -1,6 +1,11 @@
 import { PolicyFilters, PolicySearchHit, PolicySectionHit } from "../types";
-
-type UnknownRecord = Record<string, unknown>;
+import {
+  collectObjects,
+  extractBillRecords,
+  firstItem,
+  unwrapCollection,
+  UnknownRecord,
+} from "../lib/congress";
 
 const toStringValue = (value: unknown) => {
   if (typeof value === "string") return value;
@@ -149,26 +154,42 @@ export const normalizeQuery = (query: string) => {
 
 const extractSections = (bill: UnknownRecord): PolicySectionHit[] => {
   const snippets: PolicySectionHit[] = [];
-  const summary =
-    (bill?.summary as UnknownRecord | undefined)?.text ??
-    ((bill?.summaries as UnknownRecord[] | undefined)?.[0] as UnknownRecord | undefined)?.text;
-  if (summary) {
+  const summaryEntry =
+    firstItem(bill.summary) ??
+    firstItem(bill.summaries);
+  const summaryText =
+    toStringValue(summaryEntry?.text) ??
+    toStringValue(summaryEntry?.summary) ??
+    toStringValue(summaryEntry?.description) ??
+    toStringValue(bill.summary);
+  const billNumber =
+    toStringValue(bill.billNumber) ??
+    toStringValue(bill.number) ??
+    toStringValue(bill.bill_id) ??
+    "bill";
+  if (summaryText) {
     snippets.push({
-      id: `${bill?.billNumber ?? bill?.number ?? bill?.bill_id}-summary`,
+      id: `${billNumber}-summary`,
       heading:
-        (bill?.summary as UnknownRecord | undefined)?.title ??
-        ((bill?.summaries as UnknownRecord[] | undefined)?.[0] as UnknownRecord | undefined)?.title,
-      snippet: summary.slice(0, 300),
+        toStringValue(summaryEntry?.title) ??
+        toStringValue(summaryEntry?.heading) ??
+        undefined,
+      snippet: summaryText.slice(0, 300),
       score: 0.82,
       sourceUri:
-        (bill?.summary as UnknownRecord | undefined)?.url ??
-        ((bill?.summaries as UnknownRecord[] | undefined)?.[0] as UnknownRecord | undefined)?.url ??
-        (bill?.url as string | undefined),
+        toStringValue(summaryEntry?.url) ??
+        toStringValue(summaryEntry?.source) ??
+        toStringValue(bill.url) ??
+        toStringValue(bill.source),
     });
   }
-  const sections =
-    (bill?.sections as UnknownRecord[] | undefined) ??
-    (bill?.sectionList as UnknownRecord[] | undefined);
+  const sectionBySection = firstItem(bill.sectionBySection);
+  const sections = [
+    ...unwrapCollection(bill.sections),
+    ...unwrapCollection(bill.sectionList),
+    ...unwrapCollection(sectionBySection?.sections),
+    ...unwrapCollection(sectionBySection?.section),
+  ];
   if (Array.isArray(sections)) {
     sections.slice(0, 3).forEach((section, idx: number) => {
       if (!section) return;
@@ -184,17 +205,18 @@ const extractSections = (bill: UnknownRecord): PolicySectionHit[] => {
       if (text) {
         snippets.push({
           id:
-            (section.sectionId as string | undefined) ??
-            (section.identifier as string | undefined) ??
-            `${bill?.billNumber ?? bill?.number}-section-${idx}`,
+            toStringValue(section.sectionId) ??
+            toStringValue(section.identifier) ??
+            toStringValue(section.sectionNumber) ??
+            `${billNumber}-section-${idx}`,
           heading,
           snippet: String(text).slice(0, 280),
           score: 0.7 - idx * 0.05,
           sourceUri:
-            (section.url as string | undefined) ??
-            (section.citation as string | undefined) ??
-            (section.source as string | undefined) ??
-            (bill?.url as string | undefined) ??
+            toStringValue(section.url) ??
+            toStringValue(section.citation) ??
+            toStringValue(section.source) ??
+            toStringValue(bill.url) ??
             undefined,
         });
       }
@@ -228,12 +250,22 @@ const mapBillToSearchHit = (
     billType && billNumber
       ? `${congress || filters?.congress || 0}-${billType}-${billNumber}`
       : filters?.billId ?? `${congress || filters?.congress || 0}-${billType}-${billNumber}`;
+  const summaryEntry =
+    firstItem(bill.summary) ??
+    firstItem(bill.summaries);
   const summaryText =
-    ((bill?.summary as UnknownRecord | undefined)?.text as string | undefined) ??
-    (((bill?.summaries as UnknownRecord[] | undefined)?.[0] as UnknownRecord | undefined)?.text as
-      string | undefined);
-  const sponsors = bill?.sponsors as UnknownRecord[] | undefined;
-  const firstSponsor = sponsors?.[0] as UnknownRecord | undefined;
+    toStringValue(summaryEntry?.text) ??
+    toStringValue(summaryEntry?.summary) ??
+    toStringValue(summaryEntry?.description);
+  const actionEntries = collectObjects(bill.latestAction, bill.actions, bill.actionList);
+  const latestActionEntry = actionEntries[0];
+  const latestActionText =
+    toStringValue(latestActionEntry?.text) ??
+    toStringValue(latestActionEntry?.description) ??
+    toStringValue(latestActionEntry?.title) ??
+    toStringValue(latestActionEntry?.action); 
+  const sponsors = collectObjects(bill.sponsors, bill.sponsor, bill.cosponsors);
+  const firstSponsor = sponsors[0];
 
   return {
     billId,
@@ -248,19 +280,17 @@ const mapBillToSearchHit = (
       "Untitled bill",
     status:
       toStringValue(bill?.currentStatus) ??
-      toStringValue((bill?.latestAction as UnknownRecord | undefined)?.text) ??
+      latestActionText ??
       "Unknown",
-    latestAction:
-      toStringValue((bill?.latestAction as UnknownRecord | undefined)?.text) ??
-      toStringValue(((bill?.actions as UnknownRecord[] | undefined)?.[0] as UnknownRecord | undefined)?.text),
+    latestAction: latestActionText,
     summary:
       summaryText ??
       toStringValue(bill?.titleDescription) ??
-      toStringValue((bill?.latestAction as UnknownRecord | undefined)?.text),
+      latestActionText,
     jurisdiction: "federal",
     sections: extractSections(bill),
     confidence: 0,
-    sponsor: sponsors?.length
+    sponsor: sponsors.length
       ? {
           name:
             toStringValue(firstSponsor?.fullName) ??
@@ -276,15 +306,6 @@ const mapBillToSearchHit = (
         }
       : undefined,
   } satisfies PolicySearchHit;
-};
-
-const extractBillsFromPayload = (payload: UnknownRecord): UnknownRecord[] => {
-  const bills =
-    (payload?.bills as UnknownRecord[] | undefined) ??
-    (payload?.results as UnknownRecord[] | undefined) ??
-    (payload?.data as UnknownRecord[] | undefined) ??
-    [];
-  return Array.isArray(bills) ? bills : [];
 };
 
 const resolveNextUrl = (payload: UnknownRecord): string | undefined => {
@@ -312,7 +333,9 @@ export const policySearchTool = async ({
     const locator = parseBillId(filters.billId);
     if (locator) {
       const payload = await fetchWithKey(buildBillDetailUrl(locator));
-      const bill = (payload?.bill as UnknownRecord | undefined) ?? payload;
+      const bill =
+        firstItem((payload as UnknownRecord)["bill"]) ??
+        extractBillRecords(payload)[0];
       if (bill) {
         const hit = mapBillToSearchHit(bill, filters);
         hit.confidence = computeConfidence(0, 1, Boolean(hit.summary));
@@ -327,10 +350,13 @@ export const policySearchTool = async ({
 
   while (url && page < MAX_PAGES && aggregated.length < MAX_RESULTS) {
     const payload = await fetchWithKey(url);
-    const bills = extractBillsFromPayload(payload);
+    const bills = extractBillRecords(payload);
     bills.forEach((billRecord) => {
       if (aggregated.length >= MAX_RESULTS) return;
       const hit = mapBillToSearchHit(billRecord, filters);
+      if (!hit.billType || !hit.billNumber) {
+        return;
+      }
       if (aggregated.some((existing) => existing.billId === hit.billId)) {
         return;
       }

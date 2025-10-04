@@ -9,14 +9,13 @@ import {
   PolicyDNAResult,
   PolicyTimelineEntry,
 } from "../types";
+import { collectObjects, firstItem, UnknownRecord } from "../lib/congress";
 
 const CONGRESS_API_BASE =
   process.env.CONGRESS_API_BASE_URL ?? "https://api.congress.gov/v3";
 const CONGRESS_API_KEY = process.env.CONGRESS_API_KEY ?? "";
 
 const dmp = new DiffMatchPatch();
-
-type UnknownRecord = Record<string, unknown>;
 
 const toStringValue = (value: unknown) => {
   if (typeof value === "string") return value;
@@ -140,8 +139,13 @@ const calculateChange = (previous: string, current: string) => {
 };
 
 const mapActions = (bill: UnknownRecord): PolicyActionEvent[] => {
-  const actions = bill?.actions as UnknownRecord[] | undefined;
-  if (!Array.isArray(actions)) return [];
+  const actions = collectObjects(
+    bill.actions,
+    bill.actionList,
+    bill.latestActions,
+    bill.latestAction
+  );
+  if (!actions.length) return [];
   return actions.slice(0, 25).map((action) => ({
     type:
       toStringValue(action?.type) ??
@@ -168,12 +172,13 @@ const mapActions = (bill: UnknownRecord): PolicyActionEvent[] => {
 };
 
 const buildBlameFromAmendments = (bill: UnknownRecord): PolicyBlameEntry[] => {
-  const amendments =
-    (bill?.amendments as UnknownRecord[] | undefined) ??
-    (bill?.relatedBills as UnknownRecord[] | undefined) ??
-    [];
+  const amendments = collectObjects(
+    bill.amendments,
+    bill.relatedBills,
+    bill.amendmentList
+  );
   const blameEntries: PolicyBlameEntry[] = [];
-  if (Array.isArray(amendments)) {
+  if (amendments.length) {
     amendments.slice(0, 10).forEach((amendment) => {
       const sponsor = amendment?.sponsor as UnknownRecord | undefined;
       blameEntries.push({
@@ -211,18 +216,13 @@ const buildBlameFromAmendments = (bill: UnknownRecord): PolicyBlameEntry[] => {
 };
 
 const buildBlameFromSections = (bill: UnknownRecord): PolicyBlameEntry[] => {
-  const sectionsCandidates: unknown[] = [];
-  if (Array.isArray(bill?.sections)) sectionsCandidates.push(...(bill?.sections as unknown[]));
-  if (Array.isArray(bill?.sectionList)) sectionsCandidates.push(...(bill?.sectionList as unknown[]));
-  const sectionBySection = bill?.sectionBySection as UnknownRecord | undefined;
-  if (Array.isArray(sectionBySection?.sections)) {
-    sectionsCandidates.push(...(sectionBySection?.sections as unknown[]));
-  }
-  const flattened = sectionsCandidates.filter((candidate): candidate is UnknownRecord =>
-    Boolean(candidate && typeof candidate === "object")
-  );
+  const sectionBySection = firstItem(bill.sectionBySection);
+  const sections = [
+    ...collectObjects(bill.sections, bill.sectionList),
+    ...collectObjects(sectionBySection?.sections, sectionBySection?.section),
+  ];
 
-  return flattened.slice(0, 12).map((section, idx) => ({
+  return sections.slice(0, 12).map((section, idx) => ({
     sectionId:
       toStringValue(section?.sectionId) ??
       toStringValue(section?.identifier) ??
@@ -286,10 +286,12 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
   const locator = parseBillId(billId);
   const billData = await fetchWithKey(buildDetailUrl(locator));
   const bill = ((billData?.bill as UnknownRecord | undefined) ?? billData) as UnknownRecord;
-  const versions =
-    (bill?.versions as UnknownRecord[] | undefined) ??
-    (bill?.billVersions as UnknownRecord[] | undefined) ??
-    [];
+  const versions = collectObjects(
+    bill.versions,
+    bill.billVersions,
+    bill.versionList,
+    bill.latestVersion
+  );
   const sortedVersions = Array.isArray(versions)
     ? [...versions].sort((a, b) => {
         const aDate = new Date(
@@ -338,8 +340,11 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     });
   }
 
-  const sponsorList = bill?.sponsors as UnknownRecord[] | undefined;
-  const sponsor = (sponsorList?.[0] as UnknownRecord | undefined) ?? (bill?.sponsor as UnknownRecord | undefined);
+  const sponsorList = collectObjects(bill.sponsors, bill.sponsor, bill.cosponsors);
+  const sponsor = sponsorList[0];
+  const summaryEntry =
+    firstItem(bill.summary) ??
+    firstItem(bill.summaries);
   const metadata = {
     title:
       toStringValue(bill?.title) ??
@@ -355,12 +360,16 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
             undefined,
           party: toStringValue(sponsor?.party),
           state: toStringValue(sponsor?.state),
+          bioguideId:
+            toStringValue(sponsor?.bioguideId) ??
+            toStringValue(sponsor?.bioguide_id) ??
+            toStringValue(sponsor?.bioguide),
         }
       : undefined,
     summary:
-      ((bill?.summary as UnknownRecord | undefined)?.text as string | undefined) ??
-      (((bill?.summaries as UnknownRecord[] | undefined)?.[0] as UnknownRecord | undefined)?.text as
-        string | undefined),
+      toStringValue(summaryEntry?.text) ??
+      toStringValue(summaryEntry?.summary) ??
+      toStringValue(summaryEntry?.description),
     congress:
       locator.congress ??
       Number.parseInt(
