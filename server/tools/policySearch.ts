@@ -165,6 +165,52 @@ const normalizeToken = (token: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, "")
     .trim();
 
+const expandToken = (token: string): Set<string> => {
+  const variants = new Set<string>();
+  if (!token) return variants;
+  variants.add(token);
+
+  const push = (candidate: string | undefined) => {
+    if (!candidate) return;
+    const normalized = normalizeToken(candidate);
+    if (normalized.length > 1) {
+      variants.add(normalized);
+    }
+  };
+
+  if (token.endsWith("es")) {
+    push(token.slice(0, -2));
+  }
+  if (token.endsWith("s")) {
+    push(token.slice(0, -1));
+  }
+  if (token.endsWith("ing")) {
+    push(token.slice(0, -3));
+  }
+  if (token.endsWith("ed")) {
+    push(token.slice(0, -2));
+  }
+  if (token.endsWith("ation")) {
+    push(token.slice(0, -5));
+  }
+  if (token.endsWith("ment")) {
+    push(token.slice(0, -4));
+  }
+  if (token.endsWith("al")) {
+    push(token.slice(0, -2));
+  }
+
+  return variants;
+};
+
+const buildTokenIndex = (tokens: string[]): Set<string> => {
+  const expanded = new Set<string>();
+  tokens.forEach((token) => {
+    expandToken(token).forEach((variant) => expanded.add(variant));
+  });
+  return expanded;
+};
+
 const tokenize = (value: string | undefined) => {
   if (!value) return [] as string[];
   return value
@@ -172,6 +218,18 @@ const tokenize = (value: string | undefined) => {
     .split(/[^\p{L}\p{N}]+/u)
     .map((piece) => normalizeToken(piece))
     .filter((piece): piece is string => Boolean(piece && piece.length > 1));
+};
+
+const tokenMatches = (candidate: string, searchTokens: Set<string>) => {
+  if (searchTokens.has(candidate)) return true;
+  for (const variant of expandToken(candidate)) {
+    if (searchTokens.has(variant)) return true;
+  }
+  for (const search of searchTokens) {
+    if (search.length >= 3 && candidate.startsWith(search)) return true;
+    if (candidate.length >= 3 && search.startsWith(candidate)) return true;
+  }
+  return false;
 };
 
 const extractSections = (bill: UnknownRecord): PolicySectionHit[] => {
@@ -294,7 +352,7 @@ const computeRelevanceScore = (
     if (!text) continue;
     const tokens = tokenize(text);
     for (const token of tokens) {
-      if (combinedTokens.has(token)) {
+      if (tokenMatches(token, combinedTokens)) {
         score += 0.1 * weight;
       }
     }
@@ -455,8 +513,8 @@ export const policySearchTool = async ({
     }
   }
 
-  const queryTokens = new Set(tokenize(query));
-  const keywordTokens = new Set(
+  const queryTokens = buildTokenIndex(tokenize(query));
+  const keywordTokens = buildTokenIndex(
     (filters?.keywords ?? []).flatMap((keyword) => tokenize(keyword))
   );
 
