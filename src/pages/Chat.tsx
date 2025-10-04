@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { PolicyCard } from "@/components/policy/PolicyCard";
 import { ModeSelector } from "@/components/chat/ModeSelector";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Search } from "lucide-react";
+import { sendChat } from "@/lib/api";
+import type { OrchestratorResponse, PolicySearchHit } from "@/types/orchestrator";
 
 type Message = {
   id: string;
@@ -12,23 +15,65 @@ type Message = {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
+  citations?: OrchestratorResponse["answer"]["citations"];
+  guardrailWarnings?: string[];
 };
 
-type Policy = {
-  id: string;
-  title: string;
-  jurisdiction: string;
-  status: string;
-  lastAction: string;
-  confidence: number;
-  matchedSections: string[];
-  messageId: string;
-};
+type Policy = PolicySearchHit & { messageId: string };
 
 const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [mode, setMode] = useState<"describe" | "troubleshoot">("describe");
+  const [logs, setLogs] = useState<string[]>([]);
+
+  const chatMutation = useMutation({
+    mutationFn: async (input: { content: string; assistantId: string }) => {
+      const response = await sendChat(input.content);
+      return { response, assistantId: input.assistantId, content: input.content };
+    },
+    onSuccess: ({ response, assistantId }) => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                content: response.answer.answer,
+                isStreaming: false,
+                citations: response.answer.citations,
+                guardrailWarnings: response.guardrail.warnings,
+              }
+            : message
+        )
+      );
+
+      setPolicies((prev) => [
+        ...prev.filter((p) => p.messageId !== assistantId),
+        ...response.policies.map((policy) => ({
+          ...policy,
+          messageId: assistantId,
+        })),
+      ]);
+
+      setLogs(response.logs ?? []);
+    },
+    onError: (error, variables) => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === variables.assistantId
+            ? {
+                ...message,
+                content:
+                  error instanceof Error
+                    ? `Sorry, something went wrong: ${error.message}`
+                    : "Sorry, something went wrong while contacting the orchestrator.",
+                isStreaming: false,
+              }
+            : message
+        )
+      );
+    },
+  });
 
   const handleSendMessage = (content: string) => {
     const userMessage: Message = {
@@ -40,7 +85,6 @@ const Chat = () => {
 
     setMessages((prev) => [...prev, userMessage]);
 
-    // Simulate streaming response
     const assistantMessageId = (Date.now() + 1).toString();
     const assistantMessage: Message = {
       id: assistantMessageId,
@@ -52,74 +96,7 @@ const Chat = () => {
 
     setMessages((prev) => [...prev, assistantMessage]);
 
-    // Simulate streaming
-    const fullResponse =
-      mode === "describe"
-        ? `Based on your query about "${content}", I found several relevant policies. The Affordable Care Act (ACA) contains provisions matching your search criteria. According to Section 1201(4), states must establish health insurance marketplaces. This provision was inserted during the 111th Congress through amendment SA 2786.`
-        : `To help you find what you're looking for, try: 1) Use the bill number format like "HR 1234" or "S 567", 2) Filter by Congress session (e.g., "118th Congress"), or 3) Search by specific policy area like "healthcare" or "education".`;
-
-    let currentText = "";
-    let index = 0;
-
-    const streamInterval = setInterval(() => {
-      if (index < fullResponse.length) {
-        currentText += fullResponse[index];
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMessageId
-              ? { ...msg, content: currentText }
-              : msg
-          )
-        );
-        index++;
-      } else {
-        clearInterval(streamInterval);
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMessageId
-              ? { ...msg, isStreaming: false }
-              : msg
-          )
-        );
-
-        // Add policy cards after streaming completes (only in describe mode)
-        if (mode === "describe") {
-          setPolicies((prev) => [
-            ...prev,
-            {
-              id: Date.now().toString(),
-              title: "Affordable Care Act",
-              jurisdiction: "Federal",
-              status: "Active",
-              lastAction: "Amendment vote - Passed",
-              confidence: 94,
-              year: 2010,
-              matchedSections: [
-                "Section 1201(4) - Marketplace establishment",
-                "Section 1302 - Essential health benefits",
-                "Section 1311 - State flexibility",
-              ],
-              messageId: assistantMessageId,
-            },
-            {
-              id: (Date.now() + 1).toString(),
-              title: "Social Security Act",
-              jurisdiction: "Federal",
-              status: "Active",
-              lastAction: "Amended multiple times",
-              confidence: 87,
-              year: 1935,
-              matchedSections: [
-                "Title II - Federal Old-Age Benefits",
-                "Title XVIII - Health Insurance for Aged",
-                "Title XIX - Grants to States",
-              ],
-              messageId: assistantMessageId,
-            },
-          ]);
-        }
-      }
-    }, 20);
+    chatMutation.mutate({ content, assistantId: assistantMessageId });
   };
 
   return (
@@ -163,18 +140,25 @@ const Chat = () => {
               {messages.map((message) => (
                 <div key={message.id}>
                   <ChatMessage message={message} />
-                  {/* Show policy cards after this assistant message */}
                   {message.role === "assistant" && !message.isStreaming && (
                     <div className="mt-4 space-y-3">
                       {policies
-                        .filter((p) => p.messageId === message.id)
+                        .filter((policy) => policy.messageId === message.id)
                         .map((policy) => (
-                          <PolicyCard key={policy.id} policy={policy} />
+                          <PolicyCard key={policy.billId} policy={policy} />
                         ))}
                     </div>
                   )}
                 </div>
               ))}
+              {logs.length > 0 && (
+                <div className="rounded-lg border border-dashed border-border p-4 text-xs text-muted-foreground space-y-1">
+                  <p className="font-medium text-foreground">Orchestrator log</p>
+                  {logs.map((entry, idx) => (
+                    <p key={idx}>{entry}</p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -185,7 +169,7 @@ const Chat = () => {
         <div className="container mx-auto px-4 py-4 max-w-4xl">
           <ChatInput
             onSend={handleSendMessage}
-            disabled={messages.some((m) => m.isStreaming)}
+            disabled={messages.some((m) => m.isStreaming) || chatMutation.isPending}
             mode={mode}
           />
         </div>
