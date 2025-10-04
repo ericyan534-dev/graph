@@ -1,5 +1,5 @@
-import { User, Bot } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { User, Bot, Link2, ShieldAlert } from "lucide-react";
+import type { OrchestratorResponse } from "@/types/orchestrator";
 
 type Message = {
   id: string;
@@ -7,6 +7,8 @@ type Message = {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
+  citations?: OrchestratorResponse["answer"]["citations"];
+  guardrailWarnings?: string[];
 };
 
 type ChatMessageProps = {
@@ -40,14 +42,27 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
           </p>
         </div>
 
-        {!isUser && !message.isStreaming && message.content && (
-          <div className="flex gap-2 px-2">
-            <Badge variant="outline" className="text-xs font-normal">
-              Source: Congressional Record
-            </Badge>
-            <Badge variant="outline" className="text-xs font-normal">
-              Last verified: Today
-            </Badge>
+        {!isUser && !message.isStreaming && message.citations && (
+          <div className="flex flex-wrap gap-2 px-2">
+            {message.citations.map((citation) => (
+              <a
+                key={citation.url}
+                href={citation.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-primary flex items-center gap-1 hover:underline"
+              >
+                <Link2 className="h-3 w-3" />
+                {citation.label}
+              </a>
+            ))}
+          </div>
+        )}
+
+        {!isUser && message.guardrailWarnings && message.guardrailWarnings.length > 0 && (
+          <div className="flex items-center gap-2 px-2 text-xs text-amber-600">
+            <ShieldAlert className="h-3 w-3" />
+            <span>{message.guardrailWarnings.join(" · ")}</span>
           </div>
         )}
       </div>

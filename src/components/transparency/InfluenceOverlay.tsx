@@ -1,71 +1,87 @@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-
-type InfluenceEntry = {
-  name: string;
-  amount?: string;
-  industry?: string;
-  votes?: string;
-  party?: string;
-};
-
-const lobbyingData: InfluenceEntry[] = [
-  { name: "PhRMA", amount: "$27.5M", industry: "Pharmaceuticals" },
-  { name: "America's Health Insurance Plans", amount: "$8.9M", industry: "Insurance" },
-  { name: "AMA", amount: "$21.5M", industry: "Healthcare" },
-];
-
-const sponsorData: InfluenceEntry[] = [
-  { name: "Sen. Max Baucus", party: "D-MT", votes: "Key sponsor" },
-  { name: "Sen. Chuck Grassley", party: "R-IA", votes: "Co-sponsor" },
-  { name: "Sen. Tom Harkin", party: "D-IA", votes: "Co-sponsor" },
-];
+import type { InfluenceResult } from "@/types/orchestrator";
 
 type InfluenceOverlayProps = {
-  type: "lobbying" | "sponsors";
+  influence?: InfluenceResult;
+  mode: "lobbying" | "finance";
 };
 
-export const InfluenceOverlay = ({ type }: InfluenceOverlayProps) => {
-  const data = type === "lobbying" ? lobbyingData : sponsorData;
+export const InfluenceOverlay = ({ influence, mode }: InfluenceOverlayProps) => {
+  const records = mode === "lobbying" ? influence?.lobbying ?? [] : influence?.finance ?? [];
+
+  if (records.length === 0) {
+    return (
+      <div className="text-sm text-muted-foreground italic">
+        No {mode === "lobbying" ? "lobbying" : "finance"} records matched this bill in the selected APIs.
+      </div>
+    );
+  }
+
+  if (mode === "lobbying") {
+    return (
+      <div className="space-y-3">
+        {records.map((entry) => (
+          <div
+            key={entry.id}
+            className="p-3 rounded-lg bg-muted/50 border border-border hover:border-primary/50 transition-colors"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-medium text-sm text-foreground">{entry.client}</span>
+              <Badge variant="outline" className="text-xs">
+                {entry.issue ?? "General issue"}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">
+              Registrant: {entry.registrant}
+            </p>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{entry.period ?? "Recent"}</span>
+              {entry.amount && <span>${entry.amount.toLocaleString()}</span>}
+            </div>
+            {entry.sourceUrl && (
+              <a
+                href={entry.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-primary hover:underline mt-2 inline-flex"
+              >
+                View filing
+              </a>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
-      {data.map((entry, idx) => (
+      {records.map((entry) => (
         <div
-          key={idx}
+          key={entry.candidateId}
           className="p-3 rounded-lg bg-muted/50 border border-border hover:border-primary/50 transition-colors"
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="font-medium text-sm text-foreground">
-              {entry.name}
-            </span>
-            {entry.amount && (
-              <span className="text-sm font-semibold text-primary">
-                {entry.amount}
-              </span>
-            )}
-            {entry.party && (
-              <Badge
-                variant={entry.party.startsWith("D") ? "default" : "secondary"}
-                className="text-xs"
-              >
-                {entry.party}
-              </Badge>
-            )}
+            <span className="font-medium text-sm text-foreground">{entry.committeeName}</span>
+            {entry.cycle && <Badge variant="outline" className="text-xs">Cycle {entry.cycle}</Badge>}
           </div>
-
-          {entry.industry && (
-            <Badge variant="outline" className="text-xs mb-2">
-              {entry.industry}
-            </Badge>
-          )}
-
-          {entry.votes && (
-            <p className="text-xs text-muted-foreground">{entry.votes}</p>
-          )}
-
-          {type === "lobbying" && (
-            <Progress value={33 + idx * 20} className="h-1 mt-2" />
+          <div className="text-xs text-muted-foreground">
+            Total receipts: ${entry.totalReceipts?.toLocaleString() ?? "N/A"}
+          </div>
+          <Progress
+            value={Math.min(100, ((entry.totalReceipts ?? 0) / 10_000_000) * 100)}
+            className="h-1 mt-2"
+          />
+          {entry.sourceUrl && (
+            <a
+              href={entry.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-primary hover:underline mt-2 inline-flex"
+            >
+              View FEC detail
+            </a>
           )}
         </div>
       ))}
