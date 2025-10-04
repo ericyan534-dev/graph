@@ -46,6 +46,21 @@ const buildDetailUrl = ({ congress, billType, billNumber }: BillLocator) => {
   return `${CONGRESS_API_BASE}/bill/${congress}/${billType}/${billNumber}?${params.toString()}`;
 };
 
+const resolveNextUrl = (payload: UnknownRecord): string | undefined => {
+  const normalize = (value?: string) => {
+    if (!value) return undefined;
+    return value.startsWith("http") ? value : `${CONGRESS_API_BASE}${value}`;
+  };
+  const pagination = payload?.pagination as UnknownRecord | undefined;
+  const next =
+    normalize(toStringValue(pagination?.next)) ??
+    normalize(toStringValue(pagination?.nextPage)) ??
+    normalize(toStringValue(pagination?.next_url));
+  if (next) return next;
+  const links = payload?.links as UnknownRecord | undefined;
+  return normalize(toStringValue(links?.next));
+};
+
 const fetchWithKey = async (url: string): Promise<UnknownRecord> => {
   const headers: Record<string, string> = {};
   if (CONGRESS_API_KEY) {
@@ -59,39 +74,36 @@ const fetchWithKey = async (url: string): Promise<UnknownRecord> => {
 };
 
 const extractVersionUrl = (version: UnknownRecord): string | undefined => {
-  const formats =
-    (version?.formats as UnknownRecord[] | undefined) ??
-    (version?.urls as UnknownRecord[] | undefined) ??
-    [];
-  if (Array.isArray(formats)) {
-    const xml = formats.find((f) =>
-      typeof f?.url === "string" &&
-      ((toStringValue(f?.type)?.toLowerCase() ?? toStringValue(f?.format)?.toLowerCase() ?? "").includes("xml") ||
-        (toStringValue(f?.fileType)?.toLowerCase() ?? "").includes("xml"))
-    );
-    if (xml?.url) {
-      return xml.url as string;
+  const formatCandidates = collectObjects(
+    version?.formats,
+    version?.format,
+    version?.urls,
+    version?.links,
+    version?.downloadUrls
+  );
+  for (const candidate of formatCandidates) {
+    const url =
+      toStringValue(candidate?.url) ??
+      toStringValue(candidate?.link) ??
+      toStringValue(candidate?.downloadUrl);
+    if (!url) continue;
+    const kind =
+      toStringValue(candidate?.type)?.toLowerCase() ??
+      toStringValue(candidate?.format)?.toLowerCase() ??
+      toStringValue(candidate?.fileType)?.toLowerCase() ??
+      "";
+    if (kind.includes("xml") || kind.includes("uslm")) {
+      return url;
     }
-    const text = formats.find((f) =>
-      typeof f?.url === "string" &&
-      (toStringValue(f?.type)?.toLowerCase() ??
-        toStringValue(f?.format)?.toLowerCase() ??
-        toStringValue(f?.fileType)?.toLowerCase() ??
-        ""
-      ).includes("html")
-    );
-    if (text?.url) {
-      return text.url as string;
+    if (kind.includes("html") || kind.includes("text")) {
+      return url;
     }
   }
-  if (typeof version?.url === "string") {
-    return version.url as string;
-  }
-  const download = toStringValue(version?.download) ?? toStringValue(version?.link);
-  if (download) {
-    return download;
-  }
-  return undefined;
+  const directUrl =
+    toStringValue(version?.url) ??
+    toStringValue(version?.link) ??
+    toStringValue(version?.download);
+  return directUrl;
 };
 
 const downloadVersionText = async (url?: string) => {
@@ -138,13 +150,18 @@ const calculateChange = (previous: string, current: string) => {
   return { added, removed, modified };
 };
 
-const mapActions = (bill: UnknownRecord): PolicyActionEvent[] => {
-  const actions = collectObjects(
-    bill.actions,
-    bill.actionList,
-    bill.latestActions,
-    bill.latestAction
-  );
+const mapActions = (
+  bill: UnknownRecord,
+  supplied: UnknownRecord[]
+): PolicyActionEvent[] => {
+  const actions = supplied.length
+    ? supplied
+    : collectObjects(
+        bill.actions,
+        bill.actionList,
+        bill.latestActions,
+        bill.latestAction
+      );
   if (!actions.length) return [];
   return actions.slice(0, 25).map((action) => ({
     type:
@@ -171,12 +188,13 @@ const mapActions = (bill: UnknownRecord): PolicyActionEvent[] => {
   }));
 };
 
-const buildBlameFromAmendments = (bill: UnknownRecord): PolicyBlameEntry[] => {
-  const amendments = collectObjects(
-    bill.amendments,
-    bill.relatedBills,
-    bill.amendmentList
-  );
+const buildBlameFromAmendments = (
+  bill: UnknownRecord,
+  supplied: UnknownRecord[]
+): PolicyBlameEntry[] => {
+  const amendments = supplied.length
+    ? supplied
+    : collectObjects(bill.amendments, bill.relatedBills, bill.amendmentList);
   const blameEntries: PolicyBlameEntry[] = [];
   if (amendments.length) {
     amendments.slice(0, 10).forEach((amendment) => {
@@ -215,10 +233,13 @@ const buildBlameFromAmendments = (bill: UnknownRecord): PolicyBlameEntry[] => {
   return blameEntries;
 };
 
-const buildBlameFromSections = (bill: UnknownRecord): PolicyBlameEntry[] => {
+const buildBlameFromSections = (
+  bill: UnknownRecord,
+  supplied: UnknownRecord[]
+): PolicyBlameEntry[] => {
   const sectionBySection = firstItem(bill.sectionBySection);
   const sections = [
-    ...collectObjects(bill.sections, bill.sectionList),
+    ...(supplied.length ? supplied : collectObjects(bill.sections, bill.sectionList)),
     ...collectObjects(sectionBySection?.sections, sectionBySection?.section),
   ];
 
@@ -282,33 +303,93 @@ const mergeBlame = (...groups: PolicyBlameEntry[][]): PolicyBlameEntry[] => {
   return combined.slice(0, 20);
 };
 
+const uniqueBy = <T>(items: T[], key: (item: T) => string | undefined): T[] => {
+  const seen = new Set<string>();
+  const results: T[] = [];
+  for (const item of items) {
+    const identifier = key(item) ?? Math.random().toString(36).slice(2);
+    if (seen.has(identifier)) continue;
+    seen.add(identifier);
+    results.push(item);
+  }
+  return results;
+};
+
+const fetchBillCollection = async (
+  locator: BillLocator,
+  segment: string,
+  propertyKeys: string[]
+): Promise<UnknownRecord[]> => {
+  const params = new URLSearchParams({ format: "json", pageSize: "250" });
+  let url = `${CONGRESS_API_BASE}/bill/${locator.congress}/${locator.billType}/${locator.billNumber}/${segment}?${params.toString()}`;
+  const records: UnknownRecord[] = [];
+  let guard = 0;
+  while (url && guard < 12) {
+    let payload: UnknownRecord;
+    try {
+      payload = await fetchWithKey(url);
+    } catch (error) {
+      console.warn(`Failed to fetch ${segment} for ${locator.billType}-${locator.billNumber}`, error);
+      break;
+    }
+    const sources = propertyKeys.length
+      ? propertyKeys
+          .map((key) => (payload as UnknownRecord)?.[key])
+          .filter((value): value is unknown => value !== undefined)
+      : [payload];
+    if (!sources.length) {
+      sources.push(payload);
+    }
+    const entries = collectObjects(...sources);
+    records.push(...entries);
+    const next = resolveNextUrl(payload);
+    if (!next || next === url) break;
+    url = next;
+    guard += 1;
+  }
+  return records;
+};
+
 export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> => {
   const locator = parseBillId(billId);
   const billData = await fetchWithKey(buildDetailUrl(locator));
   const bill = ((billData?.bill as UnknownRecord | undefined) ?? billData) as UnknownRecord;
-  const versions = collectObjects(
-    bill.versions,
-    bill.billVersions,
-    bill.versionList,
-    bill.latestVersion
+
+  const [remoteVersions, remoteActions, remoteAmendments, remoteSections] = await Promise.all([
+    fetchBillCollection(locator, "versions", ["versions", "billVersions", "items"]),
+    fetchBillCollection(locator, "actions", ["actions", "actionList", "items"]),
+    fetchBillCollection(locator, "amendments", ["amendments", "amendmentList", "relatedBills", "items"]),
+    fetchBillCollection(locator, "sections", ["sections", "sectionList", "items"]),
+  ]);
+
+  const versionCandidates = uniqueBy(
+    [
+      ...collectObjects(bill.versions, bill.billVersions, bill.versionList, bill.latestVersion),
+      ...remoteVersions
+        .map((entry) => firstItem(entry?.version) ?? entry)
+        .filter((entry): entry is UnknownRecord => Boolean(entry)),
+    ],
+    (entry) =>
+      toStringValue(entry?.versionCode)?.toLowerCase() ??
+      toStringValue(entry?.versionNumber)?.toLowerCase() ??
+      toStringValue(entry?.version)?.toLowerCase()
   );
-  const sortedVersions = Array.isArray(versions)
-    ? [...versions].sort((a, b) => {
-        const aDate = new Date(
-          toStringValue(a?.issuedDate) ??
-            toStringValue(a?.date) ??
-            toStringValue(a?.updateDate) ??
-            0
-        ).getTime();
-        const bDate = new Date(
-          toStringValue(b?.issuedDate) ??
-            toStringValue(b?.date) ??
-            toStringValue(b?.updateDate) ??
-            0
-        ).getTime();
-        return aDate - bDate;
-      })
-    : [];
+
+  const sortedVersions = versionCandidates.sort((a, b) => {
+    const aDate = new Date(
+      toStringValue(a?.issuedDate) ??
+        toStringValue(a?.date) ??
+        toStringValue(a?.updateDate) ??
+        0
+    ).getTime();
+    const bDate = new Date(
+      toStringValue(b?.issuedDate) ??
+        toStringValue(b?.date) ??
+        toStringValue(b?.updateDate) ??
+        0
+    ).getTime();
+    return aDate - bDate;
+  });
 
   const timeline: PolicyTimelineEntry[] = [];
   let previousText = "";
@@ -340,7 +421,12 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     });
   }
 
-  const sponsorList = collectObjects(bill.sponsors, bill.sponsor, bill.cosponsors);
+  const sponsorList = collectObjects(
+    bill.sponsors,
+    bill.sponsor,
+    bill.cosponsors,
+    bill.cosponsorList
+  );
   const sponsor = sponsorList[0];
   const summaryEntry =
     firstItem(bill.summary) ??
@@ -393,7 +479,28 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
           },
         ];
 
-  let actions = mapActions(bill);
+  const actionCandidates = uniqueBy(
+    [
+      ...collectObjects(bill.actions, bill.actionList, bill.latestActions, bill.latestAction),
+      ...remoteActions
+        .map((entry) => firstItem(entry?.action) ?? entry)
+        .filter((entry): entry is UnknownRecord => Boolean(entry)),
+    ],
+    (entry) =>
+      `${
+        toStringValue(entry?.date) ??
+        toStringValue(entry?.actionDate) ??
+        toStringValue(entry?.recordedAt) ??
+        ""
+      }::${
+        toStringValue(entry?.text) ??
+        toStringValue(entry?.description) ??
+        toStringValue(entry?.title) ??
+        ""
+      }`
+  );
+
+  let actions = mapActions(bill, actionCandidates);
   if (!actions.length) {
     actions = effectiveTimeline.map((entry) => ({
       type: entry.label,
@@ -407,8 +514,37 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     }));
   }
 
-  const amendmentBlame = buildBlameFromAmendments(bill);
-  const sectionBlame = buildBlameFromSections(bill);
+  const amendmentCandidates = uniqueBy(
+    [
+      ...collectObjects(bill.amendments, bill.relatedBills, bill.amendmentList),
+      ...remoteAmendments
+        .map((entry) => firstItem(entry?.amendment) ?? entry)
+        .filter((entry): entry is UnknownRecord => Boolean(entry)),
+    ],
+    (entry) =>
+      toStringValue(entry?.number) ??
+      toStringValue(entry?.amendmentNumber) ??
+      toStringValue(entry?.id) ??
+      Math.random().toString(36)
+  );
+
+  const sectionCandidates = uniqueBy(
+    [
+      ...collectObjects(bill.sections, bill.sectionList),
+      ...remoteSections
+        .map((entry) => firstItem(entry?.section) ?? entry)
+        .filter((entry): entry is UnknownRecord => Boolean(entry)),
+    ],
+    (entry) =>
+      toStringValue(entry?.sectionId) ??
+      toStringValue(entry?.identifier) ??
+      toStringValue(entry?.sectionNumber) ??
+      toStringValue(entry?.id) ??
+      Math.random().toString(36)
+  );
+
+  const amendmentBlame = buildBlameFromAmendments(bill, amendmentCandidates);
+  const sectionBlame = buildBlameFromSections(bill, sectionCandidates);
   const timelineBlame = buildBlameFromTimeline(effectiveTimeline);
   let blame = mergeBlame(amendmentBlame, sectionBlame, timelineBlame);
 

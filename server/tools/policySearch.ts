@@ -264,7 +264,12 @@ const mapBillToSearchHit = (
     toStringValue(latestActionEntry?.description) ??
     toStringValue(latestActionEntry?.title) ??
     toStringValue(latestActionEntry?.action); 
-  const sponsors = collectObjects(bill.sponsors, bill.sponsor, bill.cosponsors);
+  const sponsors = collectObjects(
+    bill.sponsors,
+    bill.sponsor,
+    bill.cosponsors,
+    bill.cosponsorList
+  );
   const firstSponsor = sponsors[0];
 
   return {
