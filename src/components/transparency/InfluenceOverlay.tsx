@@ -9,11 +9,33 @@ type InfluenceOverlayProps = {
 
 export const InfluenceOverlay = ({ influence, mode }: InfluenceOverlayProps) => {
   const records = mode === "lobbying" ? influence?.lobbying ?? [] : influence?.finance ?? [];
+  const notes = influence?.metadata?.notes ?? [];
+  const searchTerms = influence?.metadata?.searchTerms ?? [];
+
+  const metadataBlock = (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      {notes.length > 0 && (
+        <ul className="list-disc list-inside space-y-1">
+          {notes.map((note, idx) => (
+            <li key={idx}>{note}</li>
+          ))}
+        </ul>
+      )}
+      {searchTerms.length > 0 && (
+        <p>
+          Search terms: <span className="font-medium text-foreground">{searchTerms.join(", ")}</span>
+        </p>
+      )}
+    </div>
+  );
 
   if (records.length === 0) {
     return (
-      <div className="text-sm text-muted-foreground italic">
-        No {mode === "lobbying" ? "lobbying" : "finance"} records matched this bill in the selected APIs.
+      <div className="space-y-3">
+        {notes.length > 0 || searchTerms.length > 0 ? metadataBlock : null}
+        <div className="text-sm text-muted-foreground italic">
+          No {mode === "lobbying" ? "lobbying" : "finance"} records matched this bill in the selected APIs.
+        </div>
       </div>
     );
   }
@@ -21,6 +43,7 @@ export const InfluenceOverlay = ({ influence, mode }: InfluenceOverlayProps) => 
   if (mode === "lobbying") {
     return (
       <div className="space-y-3">
+        {notes.length > 0 || searchTerms.length > 0 ? metadataBlock : null}
         {records.map((entry) => (
           <div
             key={entry.id}
@@ -57,6 +80,7 @@ export const InfluenceOverlay = ({ influence, mode }: InfluenceOverlayProps) => 
 
   return (
     <div className="space-y-3">
+      {notes.length > 0 || searchTerms.length > 0 ? metadataBlock : null}
       {records.map((entry) => (
         <div
           key={entry.candidateId}

@@ -1,17 +1,8 @@
 import {
   OrchestratorResponse,
   PolicyDetailResponse,
+  PolicyFilters,
 } from "@/types/orchestrator";
-
-type PolicyFilters = {
-  jurisdiction?: "federal" | "state";
-  congress?: number;
-  state?: string;
-  dateRange?: {
-    from?: string;
-    to?: string;
-  };
-};
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8787";
 

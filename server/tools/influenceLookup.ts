@@ -44,6 +44,33 @@ const uniqueBy = <T, K extends PropertyKey>(items: T[], key: (item: T) => K) => 
   return result;
 };
 
+const deriveLdaSearchTerms = (input: InfluenceLookupInput): string[] => {
+  const terms = new Set<string>();
+  if (input.billId) {
+    terms.add(input.billId.replace(/-/g, " "));
+  }
+  (input.keywords ?? []).forEach((keyword) => {
+    if (!keyword) return;
+    const trimmed = keyword.trim();
+    if (!trimmed) return;
+    terms.add(trimmed);
+    if (trimmed.includes(" ")) {
+      const shorter = trimmed
+        .split(/\s+/)
+        .slice(0, 4)
+        .join(" ");
+      if (shorter.length > 3) {
+        terms.add(shorter);
+      }
+    }
+  });
+  const derived = Array.from(terms).slice(0, 6);
+  if (derived.length === 0 && input.billId) {
+    return [input.billId.replace(/-/g, " ")];
+  }
+  return derived;
+};
+
 const mapLdaResults = (payload: UnknownRecord): LobbyingRecord[] => {
   const results =
     (payload?.results as UnknownRecord[] | undefined) ??
@@ -87,42 +114,63 @@ const mapLdaResults = (payload: UnknownRecord): LobbyingRecord[] => {
   return uniqueBy(mapped, (entry) => entry.id);
 };
 
-const fetchLdaFilings = async (input: InfluenceLookupInput) => {
-  const params = new URLSearchParams({ per_page: "10" });
-  if (input.keywords?.length) {
-    params.set("search", input.keywords.join(" "));
-  } else {
-    params.set("search", input.billId.replace(/-/g, " "));
+const fetchLdaFilings = async (input: InfluenceLookupInput, terms?: string[]) => {
+  const queries = terms ?? deriveLdaSearchTerms(input);
+  const collected: LobbyingRecord[] = [];
+  for (const term of queries) {
+    const params = new URLSearchParams({ per_page: "50" });
+    params.set("search", term);
+    if (input.period?.from) params.set("from_date", input.period.from);
+    if (input.period?.to) params.set("to_date", input.period.to);
+    const url = `${LDA_BASE_URL}/filings/?${params.toString()}`;
+    try {
+      const payload = await fetchJson(url);
+      const mapped = mapLdaResults(payload);
+      collected.push(...mapped);
+      if (collected.length >= 20) break;
+    } catch (error) {
+      console.warn("LDA lookup failed", error);
+    }
   }
-  if (input.period?.from) params.set("from_date", input.period.from);
-  if (input.period?.to) params.set("to_date", input.period.to);
-  const url = `${LDA_BASE_URL}/filings/?${params.toString()}`;
-  try {
-    const payload = await fetchJson(url);
-    return mapLdaResults(payload);
-  } catch (error) {
-    console.warn("LDA lookup failed", error);
-    return [];
-  }
+  return uniqueBy(collected.slice(0, 25), (entry) => entry.id);
 };
 
 const searchFecCandidate = async (name: string): Promise<UnknownRecord | undefined> => {
-  const params = new URLSearchParams({
-    per_page: "5",
-    sort_hide_null: "false",
-    sort_null_only: "false",
-    sort: "-two_year_period",
-    q: name,
-  });
-  if (FEC_API_KEY) params.set("api_key", FEC_API_KEY);
-  const url = `${FEC_BASE_URL}/candidates/search/?${params.toString()}`;
-  try {
-    const data = await fetchJson(url);
-    return (data?.results as UnknownRecord[] | undefined)?.[0];
-  } catch (error) {
-    console.warn(`FEC candidate search failed for ${name}`, error);
-    return undefined;
+  const variants = uniqueBy(
+    [
+      name,
+      name.replace(/,/g, " "),
+      name
+        .split(/\s+/)
+        .slice(0, 2)
+        .join(" "),
+      name
+        .split(/\s+/)
+        .slice(-1)
+        .join(" "),
+    ].filter((variant) => variant.trim().length > 0),
+    (variant) => variant.toLowerCase()
+  );
+
+  for (const variant of variants) {
+    const params = new URLSearchParams({
+      per_page: "5",
+      sort_hide_null: "false",
+      sort_null_only: "false",
+      sort: "-two_year_period",
+      q: variant,
+    });
+    if (FEC_API_KEY) params.set("api_key", FEC_API_KEY);
+    const url = `${FEC_BASE_URL}/candidates/search/?${params.toString()}`;
+    try {
+      const data = await fetchJson(url);
+      const result = (data?.results as UnknownRecord[] | undefined)?.[0];
+      if (result) return result;
+    } catch (error) {
+      console.warn(`FEC candidate search failed for ${variant}`, error);
+    }
   }
+  return undefined;
 };
 
 const fetchCandidateTotals = async (candidateId: string): Promise<FinanceRecord | undefined> => {
@@ -177,8 +225,9 @@ const fetchFecFinance = async (input: InfluenceLookupInput) => {
 export const influenceLookupTool = async (
   input: InfluenceLookupInput
 ): Promise<InfluenceResult> => {
+  const ldaQueries = deriveLdaSearchTerms(input);
   const [lobbying, finance] = await Promise.all([
-    fetchLdaFilings(input),
+    fetchLdaFilings(input, ldaQueries),
     fetchFecFinance(input),
   ]);
 
@@ -202,6 +251,7 @@ export const influenceLookupTool = async (
         lda: `${LDA_BASE_URL.replace(/\/?$/, "")}/filings/`,
         fec: "https://api.open.fec.gov/developers/#!/candidate/get_candidate__candidate_id__totals_",
       },
+      searchTerms: ldaQueries,
     },
   };
 };

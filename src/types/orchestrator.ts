@@ -1,3 +1,15 @@
+export type PolicyFilters = {
+  jurisdiction?: "federal" | "state";
+  congress?: number;
+  state?: string;
+  dateRange?: {
+    from?: string;
+    to?: string;
+  };
+  billId?: string;
+  keywords?: string[];
+};
+
 export type PolicySectionHit = {
   id: string;
   heading?: string;
@@ -98,6 +110,7 @@ export type InfluenceResult = {
   metadata?: {
     notes?: string[];
     links?: Record<string, string>;
+    searchTerms?: string[];
   };
 };
 
@@ -117,6 +130,7 @@ export type GuardrailFinding = {
 
 export type OrchestratorResponse = {
   query: string;
+  filters?: PolicyFilters;
   policies: PolicySearchHit[];
   dna?: PolicyDNAResult;
   influence?: InfluenceResult;

@@ -6,6 +6,8 @@ export type PolicyFilters = {
     from?: string;
     to?: string;
   };
+  billId?: string;
+  keywords?: string[];
 };
 
 export type PolicySectionHit = {
@@ -109,6 +111,7 @@ export type InfluenceResult = {
   metadata?: {
     notes?: string[];
     links?: Record<string, string>;
+    searchTerms?: string[];
   };
 };
 

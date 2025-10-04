@@ -33,6 +33,9 @@ API Gateway / Express (server/index.ts)
    | -------- | -------- | ----------- |
    | `CONGRESS_API_KEY` | ✅ | API key for [Congress.gov](https://api.congress.gov/). Needed for policy search and bill metadata. |
    | `CONGRESS_API_BASE_URL` | optional | Override the default `https://api.congress.gov/v3` endpoint if using a proxy. |
+   | `CONGRESS_PAGE_SIZE` | optional | Page size used when crawling Congress.gov search (defaults to 50). |
+   | `CONGRESS_MAX_RESULTS` | optional | Maximum number of Congress.gov hits to aggregate per query (defaults to 200). |
+   | `CONGRESS_MAX_PAGES` | optional | Upper bound on paginated requests for a single query (defaults to 6). |
    | `FEC_API_KEY` | ✅ | Key for [OpenFEC](https://api.open.fec.gov/). Enables sponsor finance totals. |
    | `FEC_API_BASE_URL` | optional | Override FEC base URL (defaults to `https://api.open.fec.gov/v1`). |
    | `LDA_API_BASE_URL` | optional | Override Senate LDA base URL (defaults to `https://lda.senate.gov/api/v1`). |
@@ -86,14 +89,14 @@ Follow this quick smoke test after the services start:
 
 * **LangGraph workflow** (`server/orchestrator.ts`): uses `Annotation.Root` to define shared state (`policies`, `dna`, `influence`, `answer`, `guardrailResult`, `logs`). Nodes run sequentially with clear log breadcrumbs.
 * **Tooling**:
-  * `policy-search` (`server/tools/policySearch.ts`) normalizes bill identifiers, calls Congress.gov, and returns top sections/snippets with heuristic confidence scores.
-  * `policy-dna` (`server/tools/policyDna.ts`) fetches version metadata, downloads GovInfo XML/HTML, calculates change deltas via `diff-match-patch`, and surfaces amendment attributions.
-  * `influence-lookup` (`server/tools/influenceLookup.ts`) queries Senate LDA filings and maps sponsors to FEC committees for finance totals.
+  * `policy-search` (`server/tools/policySearch.ts`) normalizes bill identifiers, paginates through Congress.gov (up to 200 hits by default), and returns top sections/snippets with calibrated confidence scores.
+  * `policy-dna` (`server/tools/policyDna.ts`) fetches version metadata, downloads GovInfo XML/HTML, calculates change deltas via `diff-match-patch`, and synthesizes clause attributions from amendments, section-by-section notes, or timeline changes when explicit data is missing.
+  * `influence-lookup` (`server/tools/influenceLookup.ts`) fans out across multiple Senate LDA search terms, maps sponsors to FEC committees for finance totals, and surfaces the search terms/notes used for transparency.
   * `answer-grounder` (`server/tools/answerGrounder.ts`) composes strictly descriptive responses with citation tuples through Vertex AI Gemini, with deterministic fallbacks when credentials are unavailable.
   * `guardrail` (`server/tools/guardrail.ts`) combines regex detection with Gemini-powered validations to block advisory language or unsafe content.
 * **React integration**:
   * `Chat.tsx` uses React Query to mutate conversations, streams results, shows citations with inline hyperlinks, and surfaces guardrail warnings + orchestrator logs.
-  * `TransparencyGraph.tsx` lazily fetches DNA/influence data, wires `VersionTimeline`, `BlameView`, `InfluenceOverlay`, and `HistoryPanel` components to real data, and handles loading/error states.
+  * `TransparencyGraph.tsx` lazily fetches DNA/influence data, wires `VersionTimeline`, `BlameView`, `InfluenceOverlay`, `HistoryPanel`, and the in-context `PolicyChatPanel` so users can interrogate the focused bill without leaving the transparency view.
 
 ## Extending the RAG System
 

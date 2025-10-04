@@ -8,17 +8,19 @@ import { VersionTimeline } from "@/components/transparency/VersionTimeline";
 import { BlameView } from "@/components/transparency/BlameView";
 import { InfluenceOverlay } from "@/components/transparency/InfluenceOverlay";
 import { HistoryPanel } from "@/components/transparency/HistoryPanel";
+import { PolicyChatPanel } from "@/components/transparency/PolicyChatPanel";
 import { fetchPolicyDetail } from "@/lib/api";
 
 const TransparencyGraph = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined);
+  const billId = id ?? "";
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["policy-detail", id],
-    queryFn: () => fetchPolicyDetail(id ?? ""),
-    enabled: Boolean(id),
+    queryKey: ["policy-detail", billId],
+    queryFn: () => fetchPolicyDetail(billId),
+    enabled: Boolean(billId),
   });
 
   const timeline = data?.dna.timeline ?? [];
@@ -96,6 +98,8 @@ const TransparencyGraph = () => {
             </div>
 
             <div className="space-y-6">
+              <PolicyChatPanel billId={billId} metadata={metadata} />
+
               <div className="bg-card rounded-xl border border-border p-6 shadow-medium">
                 <Tabs defaultValue="lobbying" className="w-full">
                   <TabsList className="w-full grid grid-cols-2 mb-4">

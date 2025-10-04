@@ -210,6 +210,78 @@ const buildBlameFromAmendments = (bill: UnknownRecord): PolicyBlameEntry[] => {
   return blameEntries;
 };
 
+const buildBlameFromSections = (bill: UnknownRecord): PolicyBlameEntry[] => {
+  const sectionsCandidates: unknown[] = [];
+  if (Array.isArray(bill?.sections)) sectionsCandidates.push(...(bill?.sections as unknown[]));
+  if (Array.isArray(bill?.sectionList)) sectionsCandidates.push(...(bill?.sectionList as unknown[]));
+  const sectionBySection = bill?.sectionBySection as UnknownRecord | undefined;
+  if (Array.isArray(sectionBySection?.sections)) {
+    sectionsCandidates.push(...(sectionBySection?.sections as unknown[]));
+  }
+  const flattened = sectionsCandidates.filter((candidate): candidate is UnknownRecord =>
+    Boolean(candidate && typeof candidate === "object")
+  );
+
+  return flattened.slice(0, 12).map((section, idx) => ({
+    sectionId:
+      toStringValue(section?.sectionId) ??
+      toStringValue(section?.identifier) ??
+      toStringValue(section?.sectionNumber) ??
+      toStringValue(section?.id) ??
+      `section-${idx + 1}`,
+    heading:
+      toStringValue(section?.heading) ??
+      toStringValue(section?.title) ??
+      toStringValue(section?.sectionTitle) ??
+      undefined,
+    author:
+      toStringValue(section?.sponsor) ??
+      toStringValue(section?.author) ??
+      undefined,
+    actionType:
+      toStringValue(section?.type) ?? toStringValue(section?.category) ?? "Section update",
+    actionDate: toStringValue(section?.date) ?? toStringValue(section?.lastModified),
+    summary:
+      toStringValue(section?.summary) ??
+      toStringValue(section?.text) ??
+      toStringValue(section?.description) ??
+      undefined,
+    sourceUri:
+      toStringValue(section?.url) ??
+      toStringValue(section?.source) ??
+      toStringValue(section?.citation) ??
+      undefined,
+  }));
+};
+
+const buildBlameFromTimeline = (timeline: PolicyTimelineEntry[]): PolicyBlameEntry[] => {
+  return timeline.map((entry, idx) => ({
+    sectionId: entry.versionId ?? `version-${idx + 1}`,
+    heading: entry.label,
+    author: idx === 0 ? "Introduced version" : "Revision",
+    actionType: idx === 0 ? "Introduced" : "Updated version",
+    actionDate: entry.issuedOn,
+    summary: entry.changeSummary
+      ? `Δ +${entry.changeSummary.added} / -${entry.changeSummary.removed} words`
+      : undefined,
+    sourceUri: entry.sourceUri,
+  }));
+};
+
+const mergeBlame = (...groups: PolicyBlameEntry[][]): PolicyBlameEntry[] => {
+  const combined: PolicyBlameEntry[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const entry of group) {
+      const key = `${entry.sectionId}-${entry.heading ?? ""}-${entry.actionDate ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      combined.push(entry);
+    }
+  }
+  return combined.slice(0, 20);
+};
+
 export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> => {
   const locator = parseBillId(billId);
   const billData = await fetchWithKey(buildDetailUrl(locator));
@@ -266,8 +338,6 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     });
   }
 
-  const actions = mapActions(bill);
-  const blame = buildBlameFromAmendments(bill);
   const sponsorList = bill?.sponsors as UnknownRecord[] | undefined;
   const sponsor = (sponsorList?.[0] as UnknownRecord | undefined) ?? (bill?.sponsor as UnknownRecord | undefined);
   const metadata = {
@@ -301,9 +371,55 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     billNumber: locator.billNumber,
   };
 
+  const effectiveTimeline =
+    timeline.length > 0
+      ? timeline
+      : [
+          {
+            versionId: "introduced",
+            label: metadata.title ? `${metadata.title} (introduced)` : "Introduced version",
+            issuedOn: toStringValue(bill?.introducedDate) ?? toStringValue(bill?.introduced_on),
+            changeSummary: undefined,
+            sourceUri: toStringValue(bill?.url) ?? toStringValue(bill?.source),
+          },
+        ];
+
+  let actions = mapActions(bill);
+  if (!actions.length) {
+    actions = effectiveTimeline.map((entry) => ({
+      type: entry.label,
+      date: entry.issuedOn,
+      description:
+        entry.changeSummary &&
+        (entry.changeSummary.added > 0 || entry.changeSummary.removed > 0 || entry.changeSummary.modified > 0)
+          ? `Version change: +${entry.changeSummary.added ?? 0} / -${entry.changeSummary.removed ?? 0}`
+          : "Version recorded",
+      link: entry.sourceUri,
+    }));
+  }
+
+  const amendmentBlame = buildBlameFromAmendments(bill);
+  const sectionBlame = buildBlameFromSections(bill);
+  const timelineBlame = buildBlameFromTimeline(effectiveTimeline);
+  let blame = mergeBlame(amendmentBlame, sectionBlame, timelineBlame);
+
+  if (!blame.length && actions.length) {
+    blame = mergeBlame(
+      actions.slice(0, 5).map((action, idx) => ({
+        sectionId: `action-${idx + 1}`,
+        heading: action.type,
+        author: action.actor,
+        actionType: action.type,
+        actionDate: action.date,
+        summary: action.description,
+        sourceUri: action.link,
+      }))
+    );
+  }
+
   return {
     billId,
-    timeline,
+    timeline: effectiveTimeline,
     blame,
     actions,
     metadata,

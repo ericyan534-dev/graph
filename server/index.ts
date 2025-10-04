@@ -39,8 +39,26 @@ app.get("/api/policy/:billId", async (req, res) => {
   }
   try {
     const dna = await policyDnaTool(billId);
+    const keywords = [
+      dna.metadata?.title,
+      dna.metadata?.summary,
+      dna.metadata?.billType && dna.metadata?.billNumber
+        ? `${dna.metadata.billType.toUpperCase()} ${dna.metadata.billNumber}`
+        : undefined,
+    ]
+      .concat((dna.actions ?? []).slice(0, 5).map((action) => action.description))
+      .filter((value): value is string => Boolean(value?.trim()))
+      .map((value) => value.trim());
+    const period = dna.timeline.length
+      ? {
+          from: dna.timeline[0]?.issuedOn,
+          to: dna.timeline[dna.timeline.length - 1]?.issuedOn,
+        }
+      : undefined;
     const influence = await influenceLookupTool({
       billId,
+      keywords,
+      period,
       sponsors: dna.metadata?.sponsor?.name
         ? [{ name: dna.metadata.sponsor.name }]
         : undefined,
