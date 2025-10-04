@@ -46,7 +46,16 @@ const parseBillId = (billId: string): BillLocator => {
 };
 
 const buildDetailUrl = ({ congress, billType, billNumber }: BillLocator) => {
-  const params = new URLSearchParams({ format: "json" });
+  const params = new URLSearchParams({
+    format: "json",
+    summaries: "true",
+    actions: "true",
+    amendments: "true",
+    relatedBills: "true",
+    sections: "true",
+    cosponsors: "true",
+    versions: "true",
+  });
   return `${CONGRESS_API_BASE}/bill/${congress}/${billType}/${billNumber}?${params.toString()}`;
 };
 
@@ -124,6 +133,29 @@ const flattenCongressCollection = (...sources: unknown[]): UnknownRecord[] => {
   return results;
 };
 
+const expandNestedRecords = (
+  records: UnknownRecord[],
+  nestedKeys: string[]
+): UnknownRecord[] => {
+  const expanded: UnknownRecord[] = [];
+  for (const record of records) {
+    let appended = false;
+    for (const key of nestedKeys) {
+      const value = (record as UnknownRecord)[key];
+      if (!value) continue;
+      const nested = collectObjects(value);
+      if (nested.length) {
+        expanded.push(...nested);
+        appended = true;
+      }
+    }
+    if (!appended) {
+      expanded.push(record);
+    }
+  }
+  return expanded;
+};
+
 const extractVersionUrl = (version: UnknownRecord): string | undefined => {
   const formatCandidates = collectObjects(
     version?.formats,
@@ -157,10 +189,27 @@ const extractVersionUrl = (version: UnknownRecord): string | undefined => {
   return directUrl;
 };
 
+const withApiKey = (url: string | undefined) => {
+  if (!url || !CONGRESS_API_KEY) return url;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes("congress.gov") || host.includes("govinfo.gov")) {
+      parsed.searchParams.set("api_key", CONGRESS_API_KEY);
+      parsed.searchParams.set("apiKey", CONGRESS_API_KEY);
+      return parsed.toString();
+    }
+  } catch (error) {
+    console.warn(`Failed to append api key to ${url}:`, error);
+  }
+  return url;
+};
+
 const downloadVersionText = async (url?: string) => {
   if (!url) return "";
+  const resolved = withApiKey(url);
   try {
-    const response = await fetch(url);
+    const response = await fetch(resolved ?? url);
     if (!response.ok) return "";
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType.includes("xml") || contentType.includes("html")) {
@@ -413,14 +462,23 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     fetchBillCollection(locator, "sections", ["sections", "sectionList", "items"]),
   ]);
 
+  const versionSources = collectObjects(
+    bill.versions,
+    bill.billVersions,
+    bill.versionList,
+    bill.latestVersion,
+    remoteVersions
+  );
+
   const versionCandidates = uniqueBy(
-    flattenCongressCollection(
-      bill.versions,
-      bill.billVersions,
-      bill.versionList,
-      bill.latestVersion,
-      remoteVersions
-    ).filter((entry) =>
+    expandNestedRecords(versionSources, [
+      "version",
+      "billVersion",
+      "billVersions",
+      "latestVersion",
+      "item",
+      "items",
+    ]).filter((entry) =>
       Boolean(
         toStringValue(entry?.versionCode) ??
           toStringValue(entry?.versionNumber) ??
@@ -450,9 +508,11 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     return aDate - bDate;
   });
 
+  const limitedVersions = sortedVersions.slice(0, 12);
+
   const timeline: PolicyTimelineEntry[] = [];
   let previousText = "";
-  for (const version of sortedVersions) {
+  for (const version of limitedVersions) {
     const text = await downloadVersionText(extractVersionUrl(version));
     const changeSummary = calculateChange(previousText, text);
     previousText = text;
@@ -538,14 +598,21 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
           },
         ];
 
+  const actionSources = collectObjects(
+    bill.actions,
+    bill.actionList,
+    bill.latestActions,
+    bill.latestAction,
+    remoteActions
+  );
+
   const actionCandidates = uniqueBy(
-    flattenCongressCollection(
-      bill.actions,
-      bill.actionList,
-      bill.latestActions,
-      bill.latestAction,
-      remoteActions
-    ).filter((entry) =>
+    expandNestedRecords(actionSources, [
+      "action",
+      "actions",
+      "item",
+      "items",
+    ]).filter((entry) =>
       Boolean(
         toStringValue(entry?.text) ??
           toStringValue(entry?.description) ??
@@ -581,13 +648,21 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     }));
   }
 
+  const amendmentSources = collectObjects(
+    bill.amendments,
+    bill.relatedBills,
+    bill.amendmentList,
+    remoteAmendments
+  );
+
   const amendmentCandidates = uniqueBy(
-    flattenCongressCollection(
-      bill.amendments,
-      bill.relatedBills,
-      bill.amendmentList,
-      remoteAmendments
-    ).filter((entry) =>
+    expandNestedRecords(amendmentSources, [
+      "amendment",
+      "amendments",
+      "relatedBills",
+      "item",
+      "items",
+    ]).filter((entry) =>
       Boolean(
         toStringValue(entry?.number) ??
           toStringValue(entry?.amendmentNumber) ??
@@ -601,14 +676,21 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
       Math.random().toString(36)
   );
 
+  const sectionSources = collectObjects(
+    bill.sections,
+    bill.sectionList,
+    remoteSections,
+    firstItem(bill.sectionBySection)?.sections,
+    firstItem(bill.sectionBySection)?.section
+  );
+
   const sectionCandidates = uniqueBy(
-    flattenCongressCollection(
-      bill.sections,
-      bill.sectionList,
-      remoteSections,
-      firstItem(bill.sectionBySection)?.sections,
-      firstItem(bill.sectionBySection)?.section
-    ).filter((entry) =>
+    expandNestedRecords(sectionSources, [
+      "section",
+      "sections",
+      "item",
+      "items",
+    ]).filter((entry) =>
       Boolean(
         toStringValue(entry?.sectionId) ??
           toStringValue(entry?.identifier) ??
