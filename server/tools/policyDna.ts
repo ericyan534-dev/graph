@@ -24,6 +24,40 @@ const toStringValue = (value: unknown) => {
   return undefined;
 };
 
+const toRecord = (value: unknown): UnknownRecord | undefined => {
+  if (value && typeof value === "object") {
+    return value as UnknownRecord;
+  }
+  return undefined;
+};
+
+const toArray = (value: unknown): UnknownRecord[] => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value as UnknownRecord[];
+  if (typeof value === "object") {
+    const record = value as UnknownRecord;
+    const items = record.item;
+    if (Array.isArray(items)) return items as UnknownRecord[];
+    if (items !== undefined) return [items as UnknownRecord];
+  }
+  return [];
+};
+
+const pickString = (...values: unknown[]) => {
+  for (const value of values) {
+    if (!value) continue;
+    const direct = toStringValue(value);
+    if (direct) return direct;
+    const record = toRecord(value);
+    if (!record) continue;
+    for (const key of Object.keys(record)) {
+      const nested = toStringValue(record[key]);
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+};
+
 type BillLocator = {
   congress: number;
   billType: string;
@@ -60,37 +94,40 @@ const fetchWithKey = async (url: string): Promise<UnknownRecord> => {
 };
 
 const extractVersionUrl = (version: UnknownRecord): string | undefined => {
-  const formats =
-    (version?.formats as UnknownRecord[] | undefined) ??
-    (version?.urls as UnknownRecord[] | undefined) ??
-    [];
-  if (Array.isArray(formats)) {
-    const xml = formats.find((f) =>
-      typeof f?.url === "string" &&
-      ((toStringValue(f?.type)?.toLowerCase() ?? toStringValue(f?.format)?.toLowerCase() ?? "").includes("xml") ||
-        (toStringValue(f?.fileType)?.toLowerCase() ?? "").includes("xml"))
-    );
+  const formats = [
+    ...toArray(version?.formats),
+    ...toArray(version?.urls),
+    ...toArray((version?.download as UnknownRecord | undefined)?.formats),
+  ];
+  if (formats.length) {
+    const xml = formats.find((f) => {
+      const type = (toStringValue(f?.type) ?? toStringValue(f?.format) ?? toStringValue(f?.fileType) ?? "").toLowerCase();
+      return typeof f?.url === "string" && (type.includes("xml") || type.includes("uslm"));
+    });
     if (xml?.url) {
       return xml.url as string;
     }
-    const text = formats.find((f) =>
-      typeof f?.url === "string" &&
-      (toStringValue(f?.type)?.toLowerCase() ??
-        toStringValue(f?.format)?.toLowerCase() ??
-        toStringValue(f?.fileType)?.toLowerCase() ??
-        ""
-      ).includes("html")
-    );
-    if (text?.url) {
-      return text.url as string;
+    const html = formats.find((f) => {
+      const type = (toStringValue(f?.type) ?? toStringValue(f?.format) ?? toStringValue(f?.fileType) ?? "").toLowerCase();
+      return typeof f?.url === "string" && (type.includes("html") || type.includes("txt"));
+    });
+    if (html?.url) {
+      return html.url as string;
     }
+  }
+  const download =
+    toStringValue(version?.download) ??
+    toStringValue((version?.download as UnknownRecord | undefined)?.url) ??
+    toStringValue(version?.link);
+  if (download) {
+    return download;
   }
   if (typeof version?.url === "string") {
     return version.url as string;
   }
-  const download = toStringValue(version?.download) ?? toStringValue(version?.link);
-  if (download) {
-    return download;
+  const content = toRecord(version?.content);
+  if (content?.url && typeof content.url === "string") {
+    return content.url as string;
   }
   return undefined;
 };
@@ -140,73 +177,61 @@ const calculateChange = (previous: string, current: string) => {
 };
 
 const mapActions = (bill: UnknownRecord): PolicyActionEvent[] => {
-  const actions = bill?.actions as UnknownRecord[] | undefined;
-  if (!Array.isArray(actions)) return [];
+  const actions = toArray(bill?.actions);
+  if (!actions.length) return [];
   return actions.slice(0, 25).map((action) => ({
     type:
-      toStringValue(action?.type) ??
-      toStringValue(action?.actionType) ??
-      "action",
+      pickString(
+        action?.type,
+        action?.actionType,
+        (toRecord(action?.type) ?? toRecord(action?.actionType))?.label
+      ) ?? "action",
     date:
-      toStringValue(action?.date) ??
-      toStringValue(action?.actionDate) ??
-      toStringValue(action?.recordedAt),
+      pickString(action?.date, action?.actionDate, action?.recordedAt, action?.datetime) ?? undefined,
     actor:
-      toStringValue(action?.actor) ??
-      toStringValue(action?.by) ??
-      toStringValue(action?.committee) ??
-      toStringValue(action?.chamber),
+      pickString(action?.actor, action?.by, action?.committee, action?.chamber, toRecord(action?.actor)?.name) ??
+      undefined,
     description:
-      toStringValue(action?.text) ??
-      toStringValue(action?.description) ??
-      toStringValue(action?.source),
+      pickString(action?.text, action?.description, action?.source, toRecord(action?.actionCode)?.text) ?? undefined,
     link:
-      toStringValue(action?.link) ??
-      toStringValue(action?.url) ??
-      toStringValue(action?.sourceLink),
+      pickString(action?.link, action?.url, action?.sourceLink, toRecord(action?.source)?.url) ?? undefined,
   }));
 };
 
 const buildBlameFromAmendments = (bill: UnknownRecord): PolicyBlameEntry[] => {
-  const amendments =
-    (bill?.amendments as UnknownRecord[] | undefined) ??
-    (bill?.relatedBills as UnknownRecord[] | undefined) ??
-    [];
+  const amendments = toArray(bill?.amendments).length
+    ? toArray(bill?.amendments)
+    : toArray(bill?.relatedBills);
   const blameEntries: PolicyBlameEntry[] = [];
-  if (Array.isArray(amendments)) {
-    amendments.slice(0, 10).forEach((amendment) => {
-      const sponsor = amendment?.sponsor as UnknownRecord | undefined;
-      blameEntries.push({
-        sectionId:
-          toStringValue(amendment?.number) ??
-          toStringValue(amendment?.amendmentNumber) ??
-          toStringValue(amendment?.id) ??
-          "unknown",
-        heading: toStringValue(amendment?.title) ?? toStringValue(amendment?.purpose),
-        author:
-          toStringValue(sponsor?.fullName) ??
-          toStringValue(sponsor?.name) ??
-          toStringValue(sponsor?.sponsorName) ??
-          toStringValue(amendment?.sponsor),
-        actionType:
-          toStringValue(amendment?.action) ??
-          toStringValue((amendment?.latestAction as UnknownRecord | undefined)?.text),
-        actionDate:
-          toStringValue(amendment?.submittedDate) ??
-          toStringValue(amendment?.date) ??
-          toStringValue((amendment?.latestAction as UnknownRecord | undefined)?.date),
-        summary:
-          toStringValue(amendment?.description) ??
-          toStringValue(amendment?.purpose) ??
-          toStringValue(amendment?.text),
-        sourceUri:
-          toStringValue(amendment?.url) ??
-          toStringValue(amendment?.link) ??
-          toStringValue(amendment?.origin) ??
-          undefined,
-      });
+  amendments.slice(0, 10).forEach((amendment) => {
+    const sponsor =
+      toRecord(amendment?.sponsor) ??
+      toRecord(toArray(amendment?.sponsors)[0]) ??
+      toRecord((toRecord(amendment?.sponsor)?.item as UnknownRecord | undefined) ?? undefined);
+    const latestAction = toRecord(amendment?.latestAction);
+    blameEntries.push({
+      sectionId:
+        pickString(
+          amendment?.number,
+          amendment?.amendmentNumber,
+          amendment?.id,
+          amendment?.version,
+          amendment?.versionName
+        ) ?? `amendment-${Math.random().toString(36).slice(2)}`,
+      heading: pickString(amendment?.title, amendment?.purpose, amendment?.description),
+      author:
+        pickString(
+          sponsor?.fullName,
+          sponsor?.name,
+          sponsor?.sponsorName,
+          amendment?.sponsor
+        ) ?? undefined,
+      actionType: pickString(amendment?.action, latestAction?.text, latestAction?.action),
+      actionDate: pickString(amendment?.submittedDate, amendment?.date, latestAction?.date),
+      summary: pickString(amendment?.description, amendment?.purpose, amendment?.text),
+      sourceUri: pickString(amendment?.url, amendment?.link, amendment?.origin, latestAction?.link),
     });
-  }
+  });
   return blameEntries;
 };
 
@@ -214,27 +239,22 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
   const locator = parseBillId(billId);
   const billData = await fetchWithKey(buildDetailUrl(locator));
   const bill = ((billData?.bill as UnknownRecord | undefined) ?? billData) as UnknownRecord;
-  const versions =
-    (bill?.versions as UnknownRecord[] | undefined) ??
-    (bill?.billVersions as UnknownRecord[] | undefined) ??
-    [];
-  const sortedVersions = Array.isArray(versions)
-    ? [...versions].sort((a, b) => {
-        const aDate = new Date(
-          toStringValue(a?.issuedDate) ??
-            toStringValue(a?.date) ??
-            toStringValue(a?.updateDate) ??
-            0
-        ).getTime();
-        const bDate = new Date(
-          toStringValue(b?.issuedDate) ??
-            toStringValue(b?.date) ??
-            toStringValue(b?.updateDate) ??
-            0
-        ).getTime();
-        return aDate - bDate;
-      })
-    : [];
+  const versions = toArray(
+    bill?.textVersions ?? bill?.versions ?? bill?.billVersions ?? bill?.billTextVersions
+  );
+  const sortedVersions = [...versions].sort((a, b) => {
+    const parseDate = (record: UnknownRecord) =>
+      new Date(
+        pickString(
+          record?.issuedDate,
+          record?.date,
+          record?.updateDate,
+          record?.dateIssued,
+          record?.dateIssuedIncludingText
+        ) ?? 0
+      ).getTime();
+    return parseDate(a) - parseDate(b);
+  });
 
   const timeline: PolicyTimelineEntry[] = [];
   let previousText = "";
@@ -244,23 +264,31 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     previousText = text;
     timeline.push({
       versionId:
-        toStringValue(version?.versionCode) ??
-        toStringValue(version?.versionNumber) ??
-        toStringValue(version?.version) ??
-        toStringValue(version?.id) ??
-        toStringValue(version?.versionName) ??
-        `v${timeline.length}`,
+        pickString(
+          version?.versionCode,
+          version?.versionNumber,
+          version?.version,
+          version?.id,
+          version?.versionName,
+          toRecord(version?.type)?.code
+        ) ?? `v${timeline.length}`,
       label:
-        toStringValue(version?.versionName) ??
-        toStringValue(version?.versionCode) ??
-        toStringValue(version?.title) ??
-        toStringValue(version?.label) ??
-        `Version ${timeline.length + 1}`,
+        pickString(
+          version?.versionName,
+          version?.versionCode,
+          version?.title,
+          version?.label,
+          toRecord(version?.type)?.type,
+          toRecord(version?.type)?.description
+        ) ?? `Version ${timeline.length + 1}`,
       issuedOn:
-        toStringValue(version?.issuedDate) ??
-        toStringValue(version?.date) ??
-        toStringValue(version?.updateDate) ??
-        undefined,
+        pickString(
+          version?.issuedDate,
+          version?.date,
+          version?.updateDate,
+          version?.dateIssued,
+          version?.versionDate
+        ) ?? undefined,
       changeSummary,
       sourceUri: extractVersionUrl(version),
     });
@@ -268,14 +296,20 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
 
   const actions = mapActions(bill);
   const blame = buildBlameFromAmendments(bill);
-  const sponsorList = bill?.sponsors as UnknownRecord[] | undefined;
-  const sponsor = (sponsorList?.[0] as UnknownRecord | undefined) ?? (bill?.sponsor as UnknownRecord | undefined);
+  const sponsorList = toArray(bill?.sponsors);
+  const sponsor =
+    toRecord(bill?.sponsor) ?? toRecord(sponsorList[0]) ?? toRecord(toArray(bill?.sponsor)[0]);
+  const summaryRecord =
+    toRecord(bill?.summary) ??
+    toRecord(toArray(bill?.summaries)[0]) ??
+    toRecord(toArray((bill?.summaries as UnknownRecord | undefined)?.item)[0]);
   const metadata = {
     title:
       toStringValue(bill?.title) ??
       toStringValue(bill?.shortTitle) ??
       toStringValue(bill?.originChamberTitle) ??
-      toStringValue(bill?.officialTitle),
+      toStringValue(bill?.officialTitle) ??
+      toStringValue(toRecord(toArray(bill?.titles)[0])?.title),
     sponsor: sponsor
       ? {
           name:
@@ -288,9 +322,9 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
         }
       : undefined,
     summary:
-      ((bill?.summary as UnknownRecord | undefined)?.text as string | undefined) ??
-      (((bill?.summaries as UnknownRecord[] | undefined)?.[0] as UnknownRecord | undefined)?.text as
-        string | undefined),
+      toStringValue(summaryRecord?.text) ??
+      toStringValue(summaryRecord?.description) ??
+      toStringValue(summaryRecord?.summary),
     congress:
       locator.congress ??
       Number.parseInt(

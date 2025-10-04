@@ -12,6 +12,40 @@ const toStringValue = (value: unknown) => {
   return undefined;
 };
 
+const toRecord = (value: unknown): UnknownRecord | undefined => {
+  if (value && typeof value === "object") {
+    return value as UnknownRecord;
+  }
+  return undefined;
+};
+
+const toArray = (value: unknown): UnknownRecord[] => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value as UnknownRecord[];
+  if (typeof value === "object") {
+    const record = value as UnknownRecord;
+    const item = record.item ?? record.items ?? record.results;
+    if (Array.isArray(item)) return item as UnknownRecord[];
+    if (item !== undefined) return [item as UnknownRecord];
+  }
+  return [];
+};
+
+const pickString = (...values: unknown[]) => {
+  for (const value of values) {
+    if (!value) continue;
+    const direct = toStringValue(value);
+    if (direct) return direct;
+    const record = toRecord(value);
+    if (!record) continue;
+    for (const key of Object.keys(record)) {
+      const nested = toStringValue(record[key]);
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+};
+
 type InfluenceLookupInput = {
   billId: string;
   keywords?: string[];
@@ -45,43 +79,72 @@ const uniqueBy = <T, K extends PropertyKey>(items: T[], key: (item: T) => K) => 
 };
 
 const mapLdaResults = (payload: UnknownRecord): LobbyingRecord[] => {
-  const results =
-    (payload?.results as UnknownRecord[] | undefined) ??
-    (payload?.data as UnknownRecord[] | undefined) ??
-    [];
-  if (!Array.isArray(results)) return [];
+  const results = toArray(payload?.results ?? payload?.data ?? payload?.filings);
+  if (!results.length) return [];
   const mapped: LobbyingRecord[] = [];
   for (const filing of results) {
-    const specificIssues = filing?.specific_issues as UnknownRecord[] | undefined;
+    const issues = toArray(filing?.specific_issues ?? filing?.specificIssues);
+    const primaryIssue = toRecord(issues[0]);
+    const client = toRecord(filing?.client);
+    const registrant = toRecord(filing?.registrant);
+    const id =
+      toStringValue(filing?.id) ??
+      toStringValue(filing?.filing_id) ??
+      toStringValue(filing?.registration_number) ??
+      Math.random().toString(36).slice(2);
+    const amountRaw = pickString(
+      primaryIssue?.amount,
+      filing?.amount,
+      filing?.income_amount,
+      filing?.expenses,
+      filing?.income
+    );
     mapped.push({
-      id:
-        toStringValue(filing?.id) ??
-        toStringValue(filing?.filing_id) ??
-        toStringValue(filing?.registration_number) ??
-        Math.random().toString(36).slice(2),
-      client: toStringValue(filing?.client_name) ?? toStringValue(filing?.client) ?? "Unknown client",
+      id,
+      client:
+        pickString(
+          filing?.client_name,
+          client?.name,
+          client?.client_name,
+          client?.organization_name,
+          filing?.client
+        ) ?? "Unknown client",
       registrant:
-        toStringValue(filing?.registrant_name) ??
-        toStringValue(filing?.registrant) ??
-        "Unknown registrant",
-      amount:
-        Number(
-          toStringValue(specificIssues?.[0]?.amount) ??
-            toStringValue(filing?.amount) ??
-            toStringValue(filing?.income_amount) ??
-            "0"
-        ) || undefined,
+        pickString(
+          filing?.registrant_name,
+          registrant?.name,
+          registrant?.organization_name,
+          filing?.registrant
+        ) ?? "Unknown registrant",
+      amount: amountRaw ? Number(amountRaw) || undefined : undefined,
       issue:
-        toStringValue(filing?.specific_issue) ??
-        toStringValue(specificIssues?.[0]?.issue) ??
-        toStringValue(filing?.general_issue_area),
-      period: filing?.year
-        ? `${toStringValue(filing?.year) ?? ""} Q${toStringValue(filing?.quarter) ?? ""}`
-        : toStringValue(filing?.period),
+        pickString(
+          filing?.specific_issue,
+          primaryIssue?.issue,
+          primaryIssue?.description,
+          primaryIssue?.specific_issue,
+          filing?.general_issue_area
+        ) ?? undefined,
+      period:
+        pickString(
+          filing?.period,
+          filing?.report_period,
+          filing?.effective_date,
+          filing?.year
+        ) ??
+        (filing?.year
+          ? `${toStringValue(filing?.year) ?? ""}${
+              filing?.quarter ? ` Q${toStringValue(filing?.quarter) ?? ""}` : ""
+            }`
+          : undefined),
       sourceUrl:
-        toStringValue(filing?.url) ??
-        toStringValue(filing?.pdf_url) ??
-        toStringValue(filing?.filing_url),
+        pickString(
+          filing?.url,
+          filing?.pdf_url,
+          filing?.filing_url,
+          filing?.document_url,
+          toRecord(filing?.document)?.url
+        ),
     });
   }
   return uniqueBy(mapped, (entry) => entry.id);
