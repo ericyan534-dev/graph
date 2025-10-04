@@ -44,17 +44,37 @@ API Gateway / Express (server/index.ts)
 
    > GovInfo text downloads do not require an additional key for enrolled USLM XML.
 
-3. **Run the orchestrator service**
+3. **Check your credentials**
+   * Create a `.env` file with the variables above and ensure your Google service-account JSON path is accessible.
+   * Run `npm run dev:orchestrator` once—the server will log which required keys are missing before it boots so you can correct them.
+
+4. **Run the orchestrator service**
    ```bash
    npm run dev:orchestrator
    ```
 
-4. **Start the client** (in a new terminal)
+5. **Start the client** (in a new terminal)
    ```bash
    npm run dev
    ```
 
-5. Navigate to `http://localhost:5173` and chat. The client targets `http://localhost:8787` unless `VITE_API_BASE_URL` is set.
+6. Navigate to `http://localhost:5173` and chat. The client targets `http://localhost:8787` unless `VITE_API_BASE_URL` is set.
+
+### Local validation checklist
+
+Follow this quick smoke test after the services start:
+
+1. Verify the orchestrator health endpoint:
+   ```bash
+   curl http://localhost:8787/health
+   ```
+2. Issue a sample chat request (replace the message with your query):
+   ```bash
+   curl -X POST http://localhost:8787/api/chat \
+     -H 'Content-Type: application/json' \
+     -d '{"message":"What is H.R. 5376?"}'
+   ```
+3. Open the web client at `http://localhost:5173` and send the same prompt. You should see bill cards, an answer with citations, and the environment log panel at the bottom of the chat.
 
 ### Cloud Run deployment pointers
 

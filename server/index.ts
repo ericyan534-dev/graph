@@ -5,11 +5,14 @@ import morgan from "morgan";
 import { runOrchestrator } from "./orchestrator";
 import { influenceLookupTool } from "./tools/influenceLookup";
 import { policyDnaTool } from "./tools/policyDna";
+import { logEnvironmentSummary } from "./lib/config";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("tiny"));
+
+logEnvironmentSummary();
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
