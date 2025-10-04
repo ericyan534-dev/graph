@@ -9,7 +9,11 @@ import {
   PolicyDNAResult,
   PolicyTimelineEntry,
 } from "../types";
-import { collectObjects, firstItem, UnknownRecord } from "../lib/congress";
+import {
+  collectObjects,
+  firstItem,
+  UnknownRecord,
+} from "../lib/congress";
 
 const CONGRESS_API_BASE =
   process.env.CONGRESS_API_BASE_URL ?? "https://api.congress.gov/v3";
@@ -71,6 +75,53 @@ const fetchWithKey = async (url: string): Promise<UnknownRecord> => {
     throw new Error(`Congress.gov request failed (${response.status}): ${await response.text()}`);
   }
   return (await response.json()) as UnknownRecord;
+};
+
+const flattenCongressCollection = (...sources: unknown[]): UnknownRecord[] => {
+  const queue: unknown[] = sources.filter((source) => source !== undefined);
+  const results: UnknownRecord[] = [];
+  const seen = new Set<UnknownRecord>();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current) continue;
+    if (Array.isArray(current)) {
+      queue.push(...current);
+      continue;
+    }
+    if (typeof current === "object") {
+      const record = current as UnknownRecord;
+      if (seen.has(record)) continue;
+      seen.add(record);
+      results.push(record);
+      const nested = [
+        record.item,
+        record.items,
+        record.data,
+        record.results,
+        record.collection,
+        record.section,
+        record.sections,
+        record.version,
+        record.versions,
+        record.action,
+        record.actions,
+        record.amendment,
+        record.amendments,
+        record.formats,
+        record.format,
+        record.links,
+        record.downloadUrls,
+      ];
+      nested.forEach((value) => {
+        if (value !== undefined) {
+          queue.push(value);
+        }
+      });
+    }
+  }
+
+  return results;
 };
 
 const extractVersionUrl = (version: UnknownRecord): string | undefined => {
@@ -363,12 +414,20 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
   ]);
 
   const versionCandidates = uniqueBy(
-    [
-      ...collectObjects(bill.versions, bill.billVersions, bill.versionList, bill.latestVersion),
-      ...remoteVersions
-        .map((entry) => firstItem(entry?.version) ?? entry)
-        .filter((entry): entry is UnknownRecord => Boolean(entry)),
-    ],
+    flattenCongressCollection(
+      bill.versions,
+      bill.billVersions,
+      bill.versionList,
+      bill.latestVersion,
+      remoteVersions
+    ).filter((entry) =>
+      Boolean(
+        toStringValue(entry?.versionCode) ??
+          toStringValue(entry?.versionNumber) ??
+          toStringValue(entry?.version) ??
+          toStringValue(entry?.versionName)
+      )
+    ),
     (entry) =>
       toStringValue(entry?.versionCode)?.toLowerCase() ??
       toStringValue(entry?.versionNumber)?.toLowerCase() ??
@@ -480,12 +539,20 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
         ];
 
   const actionCandidates = uniqueBy(
-    [
-      ...collectObjects(bill.actions, bill.actionList, bill.latestActions, bill.latestAction),
-      ...remoteActions
-        .map((entry) => firstItem(entry?.action) ?? entry)
-        .filter((entry): entry is UnknownRecord => Boolean(entry)),
-    ],
+    flattenCongressCollection(
+      bill.actions,
+      bill.actionList,
+      bill.latestActions,
+      bill.latestAction,
+      remoteActions
+    ).filter((entry) =>
+      Boolean(
+        toStringValue(entry?.text) ??
+          toStringValue(entry?.description) ??
+          toStringValue(entry?.action) ??
+          toStringValue(entry?.title)
+      )
+    ),
     (entry) =>
       `${
         toStringValue(entry?.date) ??
@@ -515,12 +582,18 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
   }
 
   const amendmentCandidates = uniqueBy(
-    [
-      ...collectObjects(bill.amendments, bill.relatedBills, bill.amendmentList),
-      ...remoteAmendments
-        .map((entry) => firstItem(entry?.amendment) ?? entry)
-        .filter((entry): entry is UnknownRecord => Boolean(entry)),
-    ],
+    flattenCongressCollection(
+      bill.amendments,
+      bill.relatedBills,
+      bill.amendmentList,
+      remoteAmendments
+    ).filter((entry) =>
+      Boolean(
+        toStringValue(entry?.number) ??
+          toStringValue(entry?.amendmentNumber) ??
+          toStringValue(entry?.id)
+      )
+    ),
     (entry) =>
       toStringValue(entry?.number) ??
       toStringValue(entry?.amendmentNumber) ??
@@ -529,12 +602,20 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
   );
 
   const sectionCandidates = uniqueBy(
-    [
-      ...collectObjects(bill.sections, bill.sectionList),
-      ...remoteSections
-        .map((entry) => firstItem(entry?.section) ?? entry)
-        .filter((entry): entry is UnknownRecord => Boolean(entry)),
-    ],
+    flattenCongressCollection(
+      bill.sections,
+      bill.sectionList,
+      remoteSections,
+      firstItem(bill.sectionBySection)?.sections,
+      firstItem(bill.sectionBySection)?.section
+    ).filter((entry) =>
+      Boolean(
+        toStringValue(entry?.sectionId) ??
+          toStringValue(entry?.identifier) ??
+          toStringValue(entry?.sectionNumber) ??
+          toStringValue(entry?.id)
+      )
+    ),
     (entry) =>
       toStringValue(entry?.sectionId) ??
       toStringValue(entry?.identifier) ??

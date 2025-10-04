@@ -25,11 +25,11 @@ const MAX_RESULTS = Number.parseInt(
   10
 );
 const MAX_HITS = Number.parseInt(
-  process.env.POLICY_SEARCH_MAX_HITS ?? "5",
+  process.env.POLICY_SEARCH_MAX_HITS ?? "10",
   10
 );
 const MIN_RELEVANCE = Number.parseFloat(
-  process.env.POLICY_SEARCH_MIN_RELEVANCE ?? "0.35"
+  process.env.POLICY_SEARCH_MIN_RELEVANCE ?? "0.6"
 );
 const MAX_PAGES = Number.parseInt(
   process.env.CONGRESS_MAX_PAGES ?? "6",
@@ -467,7 +467,7 @@ export const policySearchTool = async ({
     })
     .filter(({ relevance }) => relevance >= MIN_RELEVANCE)
     .sort((a, b) => b.relevance - a.relevance)
-    .slice(0, Math.max(1, MAX_HITS));
+    .slice(0, Math.max(0, Math.min(MAX_HITS, aggregated.length)));
 
   return scored.map(({ hit, relevance }, index, list) => ({
     ...hit,
