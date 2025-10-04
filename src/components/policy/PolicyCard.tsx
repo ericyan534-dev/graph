@@ -3,20 +3,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FileText, TrendingUp, Clock, MapPin } from "lucide-react";
-
-type Policy = {
-  id: string;
-  title: string;
-  jurisdiction: string;
-  status: string;
-  lastAction: string;
-  confidence: number;
-  matchedSections: string[];
-  year?: number; // Year of policy enactment
-};
+import type { PolicySearchHit } from "@/types/orchestrator";
 
 type PolicyCardProps = {
-  policy: Policy;
+  policy: PolicySearchHit;
 };
 
 export const PolicyCard = ({ policy }: PolicyCardProps) => {
@@ -28,9 +18,7 @@ export const PolicyCard = ({ policy }: PolicyCardProps) => {
     return "text-muted-foreground";
   };
 
-  // Determine if policy is old (pre-2000) or modern (2000+)
-  const isOldPolicy = policy.year && policy.year < 2000;
-  const fontClass = isOldPolicy ? "font-classic" : "font-modern";
+  const fontClass = "font-modern";
 
   return (
     <Card className="shadow-soft hover:shadow-medium transition-all border-border">
@@ -49,49 +37,53 @@ export const PolicyCard = ({ policy }: PolicyCardProps) => {
                 <MapPin className="h-3 w-3" />
                 {policy.jurisdiction}
               </Badge>
-              <Badge variant={policy.status === "Active" ? "default" : "secondary"}>
-                {policy.status}
+              <Badge
+                variant={
+                  (policy.status ?? "").toLowerCase().includes("pass") ||
+                  (policy.status ?? "").toLowerCase().includes("became law")
+                    ? "default"
+                    : "secondary"
+                }
+              >
+                {policy.status ?? "Unknown"}
               </Badge>
             </div>
 
             <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
               <Clock className="h-4 w-4" />
-              <span>{policy.lastAction}</span>
+              <span>{policy.latestAction ?? "No recent action"}</span>
             </div>
           </div>
 
           <div className="flex items-center gap-2 bg-muted px-3 py-1 rounded-full">
-            <TrendingUp
-              className={`h-4 w-4 ${getConfidenceColor(policy.confidence)}`}
-            />
-            <span
-              className={`text-sm font-semibold ${getConfidenceColor(
-                policy.confidence
-              )}`}
-            >
+            <TrendingUp className={`h-4 w-4 ${getConfidenceColor(policy.confidence)}`} />
+            <span className={`text-sm font-semibold ${getConfidenceColor(policy.confidence)}`}>
               {policy.confidence}%
             </span>
           </div>
         </div>
 
-        <div className="space-y-2 mb-4">
-          <p className="text-sm font-medium text-foreground">
-            Top matched sections:
-          </p>
-          <ul className="space-y-1">
-            {policy.matchedSections.map((section, idx) => (
-              <li
-                key={idx}
-                className="text-sm text-muted-foreground pl-4 relative before:content-['•'] before:absolute before:left-0"
-              >
-                {section}
-              </li>
-            ))}
-          </ul>
-        </div>
+        {policy.sections.length > 0 && (
+          <div className="space-y-2 mb-4">
+            <p className="text-sm font-medium text-foreground">Top matched sections:</p>
+            <ul className="space-y-1">
+              {policy.sections.map((section, idx) => (
+                <li
+                  key={section.id ?? `${policy.billId}-section-${idx}`}
+                  className="text-sm text-muted-foreground pl-4 relative before:content-['•'] before:absolute before:left-0"
+                >
+                  <span className="font-medium text-foreground">
+                    {section.heading ?? "Relevant excerpt"}
+                  </span>
+                  : {section.snippet}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <Button
-          onClick={() => navigate(`/transparency/${policy.id}`)}
+          onClick={() => navigate(`/transparency/${policy.billId}`)}
           className="w-full"
           variant="outline"
         >
