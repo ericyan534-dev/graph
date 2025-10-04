@@ -24,6 +24,13 @@ const MAX_RESULTS = Number.parseInt(
   process.env.CONGRESS_MAX_RESULTS ?? "200",
   10
 );
+const MAX_HITS = Number.parseInt(
+  process.env.POLICY_SEARCH_MAX_HITS ?? "5",
+  10
+);
+const MIN_RELEVANCE = Number.parseFloat(
+  process.env.POLICY_SEARCH_MIN_RELEVANCE ?? "0.35"
+);
 const MAX_PAGES = Number.parseInt(
   process.env.CONGRESS_MAX_PAGES ?? "6",
   10
@@ -152,6 +159,21 @@ export const normalizeQuery = (query: string) => {
   return normalized;
 };
 
+const normalizeToken = (token: string) =>
+  token
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .trim();
+
+const tokenize = (value: string | undefined) => {
+  if (!value) return [] as string[];
+  return value
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((piece) => normalizeToken(piece))
+    .filter((piece): piece is string => Boolean(piece && piece.length > 1));
+};
+
 const extractSections = (bill: UnknownRecord): PolicySectionHit[] => {
   const snippets: PolicySectionHit[] = [];
   const summaryEntry =
@@ -223,6 +245,65 @@ const extractSections = (bill: UnknownRecord): PolicySectionHit[] => {
     });
   }
   return snippets;
+};
+
+const buildBillAliasTokens = (hit: PolicySearchHit) => {
+  const aliases = new Set<string>();
+  if (hit.billType && hit.billNumber) {
+    const compact = `${hit.billType}${hit.billNumber}`.toLowerCase();
+    aliases.add(compact);
+    aliases.add(`${hit.billType} ${hit.billNumber}`.toLowerCase());
+    aliases.add(`${hit.billType.toUpperCase()} ${hit.billNumber}`.toLowerCase());
+    aliases.add(`${hit.billType.replace(/\./g, "")}${hit.billNumber}`.toLowerCase());
+  }
+  if (hit.congress) {
+    aliases.add(`${hit.congress} ${hit.billType} ${hit.billNumber}`.toLowerCase());
+  }
+  return aliases;
+};
+
+const computeRelevanceScore = (
+  hit: PolicySearchHit,
+  queryTokens: Set<string>,
+  keywordTokens: Set<string>
+) => {
+  const combinedTokens = new Set<string>([...queryTokens, ...keywordTokens]);
+  if (combinedTokens.size === 0) {
+    return hit.summary ? 0.4 : 0.2;
+  }
+
+  const haystacks: Array<[string | undefined, number]> = [
+    [hit.title, 4],
+    [hit.summary, 3],
+    [hit.latestAction, 2],
+    [hit.sections.map((section) => section.snippet).join(" "), 1.5],
+    [hit.sponsor?.name, 1],
+  ];
+
+  const aliasTokens = buildBillAliasTokens(hit);
+  const aliasMatches = Array.from(aliasTokens).filter((alias) =>
+    alias &&
+    haystacks.some(([text]) =>
+      typeof text === "string" && text.toLowerCase().includes(alias)
+    )
+  );
+
+  let score = aliasMatches.length > 0 ? 0.45 : 0;
+
+  for (const [text, weight] of haystacks) {
+    if (!text) continue;
+    const tokens = tokenize(text);
+    for (const token of tokens) {
+      if (combinedTokens.has(token)) {
+        score += 0.1 * weight;
+      }
+    }
+  }
+
+  const keywordBoost = keywordTokens.size > 0 ? 0.05 * keywordTokens.size : 0;
+  score += keywordBoost;
+
+  return Math.min(0.99, score);
 };
 
 const mapBillToSearchHit = (
@@ -374,8 +455,31 @@ export const policySearchTool = async ({
     }
   }
 
-  return aggregated.map((hit, index, list) => ({
+  const queryTokens = new Set(tokenize(query));
+  const keywordTokens = new Set(
+    (filters?.keywords ?? []).flatMap((keyword) => tokenize(keyword))
+  );
+
+  const scored = aggregated
+    .map((hit) => {
+      const relevance = computeRelevanceScore(hit, queryTokens, keywordTokens);
+      return { hit, relevance };
+    })
+    .filter(({ relevance }) => relevance >= MIN_RELEVANCE)
+    .sort((a, b) => b.relevance - a.relevance)
+    .slice(0, Math.max(1, MAX_HITS));
+
+  return scored.map(({ hit, relevance }, index, list) => ({
     ...hit,
-    confidence: computeConfidence(index, list.length, Boolean(hit.summary)),
+    confidence:
+      Math.max(
+        35,
+        Math.round(
+          Math.max(
+            relevance * 100,
+            computeConfidence(index, list.length, Boolean(hit.summary))
+          )
+        )
+      ),
   }));
 };

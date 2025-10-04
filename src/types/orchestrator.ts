@@ -94,6 +94,8 @@ export type LobbyingRecord = {
   issue?: string;
   period?: string;
   sourceUrl?: string;
+  relatedBills?: string[];
+  matchedTerms?: string[];
 };
 
 export type FinanceRecord = {

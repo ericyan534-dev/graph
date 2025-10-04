@@ -24,6 +24,42 @@ type InfluenceLookupInput = {
   };
 };
 
+const parseBillId = (billId: string) => {
+  const [congress, billType, billNumber] = billId.split("-");
+  if (!billType || !billNumber) return undefined;
+  return {
+    congress,
+    billType,
+    billNumber,
+  };
+};
+
+const buildBillAliases = (billId: string) => {
+  const parsed = parseBillId(billId);
+  if (!parsed) return [] as string[];
+  const { congress, billType, billNumber } = parsed;
+  const normalizedType = (billType ?? "").replace(/\./g, "").toLowerCase();
+  const base = `${normalizedType} ${billNumber}`.trim();
+  const variants = new Set<string>([
+    base,
+    `${normalizedType}${billNumber}`,
+    `${normalizedType.toUpperCase()} ${billNumber}`.toLowerCase(),
+    `${normalizedType}.${billNumber}`,
+    `${normalizedType.toUpperCase()}.${billNumber}`.toLowerCase(),
+    `${normalizedType.split("").join(".")}.${billNumber}`,
+    `${normalizedType.split("").join(" ")} ${billNumber}`,
+  ]);
+  if (congress) {
+    variants.add(`${congress} ${base}`);
+    variants.add(`${congress}th ${base}`);
+  }
+  variants.add(base.replace(/\s+/g, ""));
+  variants.add(base.replace(/\s+/g, "-"));
+  return Array.from(variants)
+    .map((alias) => alias.toLowerCase())
+    .filter((alias) => alias.length > 2);
+};
+
 const fetchJson = async (url: string): Promise<UnknownRecord> => {
   const response = await fetch(url);
   if (!response.ok) {
@@ -47,6 +83,10 @@ const uniqueBy = <T, K extends PropertyKey>(items: T[], key: (item: T) => K) => 
 const deriveLdaSearchTerms = (input: InfluenceLookupInput): string[] => {
   const terms = new Set<string>();
   if (input.billId) {
+    const aliases = buildBillAliases(input.billId);
+    aliases.forEach((alias) => {
+      terms.add(alias.replace(/-/g, " "));
+    });
     terms.add(input.billId.replace(/-/g, " "));
   }
   (input.keywords ?? []).forEach((keyword) => {
@@ -71,7 +111,26 @@ const deriveLdaSearchTerms = (input: InfluenceLookupInput): string[] => {
   return derived;
 };
 
-const mapLdaResults = (payload: UnknownRecord): LobbyingRecord[] => {
+const extractBillReferences = (filing: UnknownRecord): string[] => {
+  const bills =
+    (filing?.bills as UnknownRecord[] | undefined) ??
+    (filing?.bill_numbers as UnknownRecord[] | undefined) ??
+    [];
+  if (!Array.isArray(bills)) return [];
+  return bills
+    .map((entry) =>
+      toStringValue(entry?.bill_number) ??
+      toStringValue(entry?.bill) ??
+      toStringValue(entry?.bill_id) ??
+      undefined
+    )
+    .filter((value): value is string => Boolean(value));
+};
+
+const mapLdaResults = (
+  payload: UnknownRecord,
+  context: { aliases: string[]; searchTerm?: string }
+): LobbyingRecord[] => {
   const results =
     (payload?.results as UnknownRecord[] | undefined) ??
     (payload?.data as UnknownRecord[] | undefined) ??
@@ -80,17 +139,54 @@ const mapLdaResults = (payload: UnknownRecord): LobbyingRecord[] => {
   const mapped: LobbyingRecord[] = [];
   for (const filing of results) {
     const specificIssues = filing?.specific_issues as UnknownRecord[] | undefined;
+    const issueText =
+      toStringValue(filing?.specific_issue) ??
+      toStringValue(specificIssues?.[0]?.issue) ??
+      toStringValue(filing?.general_issue_area) ??
+      toStringValue(filing?.description);
+    const haystack = [
+      issueText ?? "",
+      toStringValue(filing?.short_description) ?? "",
+      (specificIssues ?? [])
+        .map((entry) => toStringValue(entry?.issue) ?? "")
+        .join(" "),
+      extractBillReferences(filing).join(" "),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    const normalizedHaystack = haystack.replace(/[^\p{L}\p{N}]+/gu, " ");
+
+    const matchedAliases = context.aliases.filter((alias) =>
+      alias &&
+      (haystack.includes(alias) ||
+        normalizedHaystack.includes(alias.replace(/[^\p{L}\p{N}]+/gu, " ")))
+    );
+
+    if (context.aliases.length > 0 && matchedAliases.length === 0) {
+      continue;
+    }
+
+    const client =
+      toStringValue(filing?.client_name) ??
+      toStringValue(filing?.client) ??
+      undefined;
+    const registrant =
+      toStringValue(filing?.registrant_name) ??
+      toStringValue(filing?.registrant) ??
+      undefined;
+    if (!client || !registrant) {
+      continue;
+    }
+
     mapped.push({
       id:
         toStringValue(filing?.id) ??
         toStringValue(filing?.filing_id) ??
         toStringValue(filing?.registration_number) ??
         Math.random().toString(36).slice(2),
-      client: toStringValue(filing?.client_name) ?? toStringValue(filing?.client) ?? "Unknown client",
-      registrant:
-        toStringValue(filing?.registrant_name) ??
-        toStringValue(filing?.registrant) ??
-        "Unknown registrant",
+      client,
+      registrant,
       amount:
         Number(
           toStringValue(specificIssues?.[0]?.amount) ??
@@ -98,10 +194,7 @@ const mapLdaResults = (payload: UnknownRecord): LobbyingRecord[] => {
             toStringValue(filing?.income_amount) ??
             "0"
         ) || undefined,
-      issue:
-        toStringValue(filing?.specific_issue) ??
-        toStringValue(specificIssues?.[0]?.issue) ??
-        toStringValue(filing?.general_issue_area),
+      issue: issueText ?? undefined,
       period: filing?.year
         ? `${toStringValue(filing?.year) ?? ""} Q${toStringValue(filing?.quarter) ?? ""}`
         : toStringValue(filing?.period),
@@ -109,6 +202,13 @@ const mapLdaResults = (payload: UnknownRecord): LobbyingRecord[] => {
         toStringValue(filing?.url) ??
         toStringValue(filing?.pdf_url) ??
         toStringValue(filing?.filing_url),
+      relatedBills: extractBillReferences(filing),
+      matchedTerms:
+        matchedAliases.length > 0
+          ? matchedAliases
+          : context.searchTerm
+          ? [context.searchTerm]
+          : undefined,
     });
   }
   return uniqueBy(mapped, (entry) => entry.id);
@@ -117,6 +217,7 @@ const mapLdaResults = (payload: UnknownRecord): LobbyingRecord[] => {
 const fetchLdaFilings = async (input: InfluenceLookupInput, terms?: string[]) => {
   const queries = terms ?? deriveLdaSearchTerms(input);
   const collected: LobbyingRecord[] = [];
+  const aliases = buildBillAliases(input.billId);
   for (const term of queries) {
     const params = new URLSearchParams({ per_page: "50" });
     params.set("search", term);
@@ -125,14 +226,22 @@ const fetchLdaFilings = async (input: InfluenceLookupInput, terms?: string[]) =>
     const url = `${LDA_BASE_URL}/filings/?${params.toString()}`;
     try {
       const payload = await fetchJson(url);
-      const mapped = mapLdaResults(payload);
+      const mapped = mapLdaResults(payload, { aliases, searchTerm: term });
       collected.push(...mapped);
       if (collected.length >= 20) break;
     } catch (error) {
       console.warn("LDA lookup failed", error);
     }
   }
-  return uniqueBy(collected.slice(0, 25), (entry) => entry.id);
+  const filtered = aliases.length
+    ? collected.filter((entry) =>
+        (entry.matchedTerms ?? []).some((alias) => aliases.includes(alias)) ||
+        (entry.relatedBills ?? []).some((bill) =>
+          aliases.some((alias) => bill.toLowerCase().includes(alias))
+        )
+      )
+    : collected;
+  return uniqueBy(filtered.slice(0, 25), (entry) => entry.id);
 };
 
 const searchFecCandidate = async (name: string): Promise<UnknownRecord | undefined> => {
@@ -236,7 +345,7 @@ export const influenceLookupTool = async (
     notes.push("FEC API key not provided; finance data may be limited.");
   }
   if (!lobbying.length) {
-    notes.push("No recent Senate LDA filings matched the query.");
+    notes.push("No recent Senate LDA filings matched this bill.");
   }
   if (!finance.length) {
     notes.push("No FEC finance totals were matched to bill sponsors.");
