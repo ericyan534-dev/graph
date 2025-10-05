@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, TrendingUp, MapPin, Clock } from "lucide-react";
+import { FileText, TrendingUp, MapPin, Clock, Dna, Network } from "lucide-react";
 import type { PolicySearchHit } from "@/types/orchestrator";
 
 type PolicyCardProps = {
@@ -37,6 +37,26 @@ export const PolicyCard = ({ policy }: PolicyCardProps) => {
   };
 
   const fontClass = "font-modern";
+  const shortDescription =
+    policy.summary ?? policy.sections[0]?.snippet ?? policy.latestAction ?? "No summary available.";
+
+  const quickActions = [
+    {
+      label: "Policy DNA",
+      icon: Dna,
+      to: (billId: string) => `/dna/${billId}`,
+    },
+    {
+      label: "Influence Tracker",
+      icon: Network,
+      to: (billId: string) => `/influence/${billId}`,
+    },
+    {
+      label: "About",
+      icon: FileText,
+      to: (_billId: string) => "/about",
+    },
+  ];
 
   return (
     <Card className="glass border-card-border transition-all hover:shadow-glow">
@@ -59,6 +79,7 @@ export const PolicyCard = ({ policy }: PolicyCardProps) => {
               <FileText className="h-5 w-5 text-primary" />
               <h3 className={`text-lg ${fontClass}`}>{policy.title}</h3>
             </div>
+            <p className="mt-3 text-sm text-muted-foreground line-clamp-2">{shortDescription}</p>
             <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
               <Clock className="h-4 w-4" />
               <span>{policy.latestAction ?? "No recent action"}</span>
@@ -93,6 +114,26 @@ export const PolicyCard = ({ policy }: PolicyCardProps) => {
             </ul>
           </div>
         )}
+
+        <div className="flex flex-wrap gap-2">
+          {quickActions.map((action) => {
+            const Icon = action.icon;
+            const target = action.to(policy.billId);
+
+            return (
+              <Button
+                key={action.label}
+                variant="outline"
+                size="sm"
+                className="gap-2 border-border/70 hover:border-primary hover:bg-primary/10 hover:text-primary"
+                onClick={() => navigate(target)}
+              >
+                <Icon className="h-4 w-4" />
+                {action.label}
+              </Button>
+            );
+          })}
+        </div>
 
         <Button
           onClick={() => navigate(`/transparency/${policy.billId}`)}

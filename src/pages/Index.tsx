@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
-import { Bot, Dna, FileText, Network, Send } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Bot, FileText, Send } from "lucide-react";
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { PolicyCard } from "@/components/policy/PolicyCard";
 import { Badge } from "@/components/ui/badge";
@@ -30,24 +30,6 @@ type MutationResponse = {
   assistantId: string;
 };
 
-const quickActions = [
-  {
-    label: "Policy DNA",
-    icon: Dna,
-    to: (billId?: string) => (billId ? `/transparency/${billId}` : "/dna"),
-  },
-  {
-    label: "Influence Tracker",
-    icon: Network,
-    to: (billId?: string) => (billId ? `/transparency/${billId}#influence` : "/influence"),
-  },
-  {
-    label: "About",
-    icon: FileText,
-    to: () => "/about",
-  },
-];
-
 const Index = () => {
   const [messages, setMessages] = useState<Message[]>(() => [
     {
@@ -61,7 +43,6 @@ const Index = () => {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [input, setInput] = useState("");
-  const navigate = useNavigate();
 
   const chatMutation = useMutation<MutationResponse, Error, MutationInput>({
     mutationFn: async ({ content, assistantId }) => {
@@ -184,36 +165,14 @@ const Index = () => {
           <div className="space-y-6">
             {messages.map((message) => {
               const relatedPolicies = policies.filter((policy) => policy.messageId === message.id);
-              const firstPolicy = relatedPolicies[0];
-              const showQuickActions = message.role === "assistant" && !message.isStreaming;
+              const showPolicies = message.role === "assistant" && !message.isStreaming && relatedPolicies.length > 0;
 
               return (
                 <div key={message.id} className="space-y-4">
                   <ChatMessage message={message}>
-                    {showQuickActions && (
-                      <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
-                        {quickActions.map((action) => {
-                          const Icon = action.icon;
-                          const target = action.to(firstPolicy?.billId);
-
-                          return (
-                            <Button
-                              key={action.label}
-                              variant="outline"
-                              size="sm"
-                              className="gap-2 hover:border-primary hover:bg-primary/10 hover:text-primary"
-                              onClick={() => navigate(target)}
-                            >
-                              <Icon className="h-4 w-4" />
-                              {action.label}
-                            </Button>
-                          );
-                        })}
-                      </div>
-                    )}
                   </ChatMessage>
 
-                  {showQuickActions && relatedPolicies.length > 0 && (
+                  {showPolicies && (
                     <div className="grid gap-4 md:grid-cols-2">
                       {relatedPolicies.map((policy) => (
                         <PolicyCard key={policy.billId} policy={policy} />
