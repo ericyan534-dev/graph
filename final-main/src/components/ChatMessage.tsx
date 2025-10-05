@@ -1,4 +1,4 @@
-import { Bot, User, ExternalLink } from "lucide-react";
+import { Bot, User, ExternalLink, ShieldAlert } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -12,9 +12,11 @@ interface ChatMessageProps {
   role: 'user' | 'assistant';
   content: string;
   citations?: Citation[];
+  isStreaming?: boolean;
+  guardrailWarnings?: string[];
 }
 
-const ChatMessage = ({ role, content, citations }: ChatMessageProps) => {
+const ChatMessage = ({ role, content, citations, isStreaming, guardrailWarnings }: ChatMessageProps) => {
   const isUser = role === 'user';
 
   // Extract inline citations from content (format: [Source: description])
@@ -48,6 +50,9 @@ const ChatMessage = ({ role, content, citations }: ChatMessageProps) => {
         }`}>
           <div className="prose prose-sm max-w-none dark:prose-invert whitespace-pre-wrap">
             {content}
+            {isStreaming && (
+              <span className="inline-flex w-2 h-4 ml-1 bg-current/60 animate-pulse rounded-sm align-middle" />
+            )}
           </div>
         </Card>
 
@@ -92,6 +97,13 @@ const ChatMessage = ({ role, content, citations }: ChatMessageProps) => {
                 )}
               </Badge>
             ))}
+          </div>
+        )}
+
+        {!isUser && guardrailWarnings && guardrailWarnings.length > 0 && (
+          <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-md px-3 py-2 mr-12">
+            <ShieldAlert className="h-3 w-3" />
+            <span>{guardrailWarnings.join(' · ')}</span>
           </div>
         )}
       </div>
