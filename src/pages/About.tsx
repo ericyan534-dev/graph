@@ -53,8 +53,8 @@ const techStack = [
 
 const About = () => (
   <div className="min-h-screen bg-background">
-    <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur-sm">
-      <div className="container mx-auto flex items-center gap-4 px-4 py-4">
+    <header className="sticky top-0 z-50 border-b border-border bg-card/95 shadow-sm backdrop-blur-sm">
+      <div className="container mx-auto flex max-w-5xl items-center gap-4 px-4 py-4">
         <Link to="/">
           <Button variant="ghost" size="sm" className="gap-2">
             <ArrowLeft className="h-4 w-4" />
@@ -62,14 +62,14 @@ const About = () => (
           </Button>
         </Link>
         <div>
-          <h1 className="text-2xl font-bold">About PolyScope</h1>
+          <h1 className="gradient-text text-2xl font-bold">About PolyScope</h1>
           <p className="text-sm text-muted-foreground">Built with modern web technologies</p>
         </div>
       </div>
     </header>
 
-    <main className="container mx-auto max-w-6xl px-4 py-8">
-      <Card className="glass border-card-border p-8 shadow-lg">
+    <main className="container mx-auto max-w-5xl px-4 py-8">
+      <Card className="mb-8 glass border-card-border p-8 shadow-lg">
         <h2 className="mb-4 text-3xl font-bold">Technology Stack</h2>
         <p className="leading-relaxed text-muted-foreground">
           PolyScope is built using cutting-edge web technologies to deliver a fast, reliable, and scalable policy transparency
@@ -77,7 +77,7 @@ const About = () => (
         </p>
       </Card>
 
-      <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {techStack.map((section) => (
           <Card key={section.category} className="glass border-card-border p-6 transition-all hover:shadow-glow">
             <div className="mb-6 flex items-center gap-3">
@@ -96,7 +96,7 @@ const About = () => (
         ))}
       </div>
 
-      <Card className="glass border-card-border p-8 shadow-lg">
+      <Card className="mt-8 glass border-card-border p-8 shadow-lg">
         <h3 className="mb-4 text-2xl font-bold">Why These Technologies?</h3>
         <div className="space-y-4 text-muted-foreground">
           <p>

@@ -151,18 +151,18 @@ const Index = () => {
 
   return (
     <div className="flex h-screen flex-col bg-background">
-      <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="container mx-auto flex items-center justify-between gap-6 px-4 py-4">
+      <header className="sticky top-0 z-50 border-b border-border bg-card/95 shadow-sm backdrop-blur-sm">
+        <div className="container mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg gradient-primary shadow-glow">
               <Bot className="h-6 w-6 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-tight">PolyScope</h1>
-              <p className="text-xs text-muted-foreground">AI-Powered Policy Intelligence</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">PolyScope</p>
+              <h1 className="text-lg font-bold tracking-tight">Policy Intelligence Hub</h1>
             </div>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
             <ModeSelector mode={mode} onModeChange={setMode} />
             <ThemeToggle />
             <Link to="/about">
@@ -171,8 +171,8 @@ const Index = () => {
                 <span className="hidden sm:inline">About</span>
               </Button>
             </Link>
-            <Badge className="bg-success/10 text-success border-success/20">
-              <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-success" />
+            <Badge className="flex items-center gap-2 border-success/20 bg-success/10 text-success">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-success" />
               Live
             </Badge>
           </div>
@@ -180,10 +180,10 @@ const Index = () => {
       </header>
 
       <main className="flex-1 overflow-y-auto">
-        <div className="container mx-auto px-4 py-6">
+        <div className="container mx-auto max-w-5xl space-y-8 px-4 py-6">
           {messages.length === 0 ? (
-            <div className="space-y-6">
-              <div className="rounded-3xl p-10 text-white shadow-glow gradient-hero">
+            <div className="space-y-8">
+              <div className="gradient-hero rounded-3xl p-10 text-white shadow-glow">
                 <div className="flex flex-col gap-4 text-balance md:flex-row md:items-end md:justify-between">
                   <div className="space-y-2">
                     <p className="text-sm uppercase tracking-[0.2em] text-white/80">Welcome</p>
@@ -218,13 +218,13 @@ const Index = () => {
               </div>
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-8">
               {messages.map((message) => {
                 const relatedPolicies = policies.filter((policy) => policy.messageId === message.id);
                 const firstPolicy = relatedPolicies[0];
 
                 return (
-                  <div key={message.id} className="space-y-4 animate-fade-up">
+                  <div key={message.id} className="space-y-4">
                     <ChatMessage message={message} />
 
                     {message.role === "assistant" && !message.isStreaming && (
@@ -247,7 +247,7 @@ const Index = () => {
                                 key={action.label}
                                 variant="outline"
                                 size="sm"
-                                className="gap-2 hover:bg-primary/10 hover:text-primary hover:border-primary"
+                                className="gap-2 rounded-full border-card-border/80 bg-card/70 backdrop-blur hover:border-primary hover:bg-primary/10 hover:text-primary"
                                 onClick={() => navigate(target)}
                               >
                                 <Icon className="h-4 w-4" />
@@ -263,20 +263,22 @@ const Index = () => {
               })}
 
               {isStreaming && (
-                <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-md">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg gradient-primary shadow-glow">
-                    <Bot className="h-5 w-5 text-primary-foreground" />
+                <Card className="glass border-card-border p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg gradient-primary shadow-glow">
+                      <Bot className="h-5 w-5 text-primary-foreground" />
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      Analyzing your request…
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    Analyzing your request…
-                  </div>
-                </div>
+                </Card>
               )}
 
               {logs.length > 0 && (
-                <Card className="border-dashed border-border/80 bg-muted/40 p-4 text-xs text-muted-foreground">
-                  <p className="mb-2 font-medium text-foreground">Orchestrator log</p>
+                <Card className="glass border-dashed border-border/70 p-4 text-xs text-muted-foreground">
+                  <p className="mb-2 text-sm font-semibold text-foreground">Orchestrator log</p>
                   <div className="space-y-1">
                     {logs.map((entry, index) => (
                       <p key={`${entry}-${index}`}>{entry}</p>
@@ -290,15 +292,15 @@ const Index = () => {
       </main>
 
       <footer className="border-t border-border bg-card/95 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto max-w-5xl px-4 py-4">
           <div className="flex flex-col gap-2">
-            <div className="flex items-end gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <Textarea
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={placeholder}
-                className="min-h-[60px] max-h-[200px] resize-none shadow-md"
+                className="min-h-[60px] max-h-[200px] flex-1 resize-none rounded-2xl border-card-border bg-card/80 shadow-md backdrop-blur"
                 rows={2}
                 disabled={chatMutation.isPending || isStreaming}
               />

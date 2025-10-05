@@ -1,5 +1,6 @@
 import { MessageSquare, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type ModeSelectorProps = {
   mode: "describe" | "troubleshoot";
@@ -7,22 +8,37 @@ type ModeSelectorProps = {
 };
 
 export const ModeSelector = ({ mode, onModeChange }: ModeSelectorProps) => {
+  const baseClasses =
+    "rounded-full px-4 text-xs font-semibold transition-all sm:text-sm";
+
   return (
-    <div className="flex gap-2 p-1 bg-muted rounded-lg">
+    <div className="flex items-center gap-1 rounded-full border border-border bg-card/80 p-1 shadow-sm backdrop-blur">
       <Button
-        variant={mode === "describe" ? "default" : "ghost"}
+        variant="ghost"
         size="sm"
         onClick={() => onModeChange("describe")}
-        className="gap-2"
+        className={cn(
+          baseClasses,
+          "gap-2",
+          mode === "describe"
+            ? "bg-gradient-primary text-primary-foreground shadow-glow hover:text-primary-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        )}
       >
         <MessageSquare className="h-4 w-4" />
         Describe
       </Button>
       <Button
-        variant={mode === "troubleshoot" ? "default" : "ghost"}
+        variant="ghost"
         size="sm"
         onClick={() => onModeChange("troubleshoot")}
-        className="gap-2"
+        className={cn(
+          baseClasses,
+          "gap-2",
+          mode === "troubleshoot"
+            ? "bg-gradient-primary text-primary-foreground shadow-glow hover:text-primary-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        )}
       >
         <HelpCircle className="h-4 w-4" />
         Troubleshoot
