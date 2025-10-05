@@ -1,277 +1,148 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import ChatMessage from "@/components/ChatMessage";
+import ChatInput from "@/components/ChatInput";
+import LegitimacyWidget from "@/components/LegitimacyWidget";
+import ConversationList from "@/components/ConversationList";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Brain } from "lucide-react";
 
-import ChatInput from "@/components/ChatInput";
-import ChatMessage from "@/components/ChatMessage";
-import ConversationList from "@/components/ConversationList";
-import LegitimacyWidget from "@/components/LegitimacyWidget";
-import { ModeSelector } from "@/components/chat/ModeSelector";
-import { PolicyCard } from "@/components/policy/PolicyCard";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { useToast } from "@/hooks/use-toast";
-import { sendChat } from "@/lib/api";
-import type { OrchestratorResponse, PolicySearchHit } from "@/types/orchestrator";
-
-const STORAGE_KEY = "poliscope_conversations";
-
-const uuid = () =>
-  typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-type Message = {
-  id: string;
-  role: "user" | "assistant";
+interface Message {
+  role: 'user' | 'assistant';
   content: string;
-  timestamp: string;
-  isStreaming?: boolean;
-  citations?: OrchestratorResponse["answer"]["citations"];
-  guardrailWarnings?: string[];
-  policies?: PolicySearchHit[];
-};
+  id: string;
+}
 
-type Conversation = {
+interface Conversation {
   id: string;
   title: string;
   updated_at: string;
   messages: Message[];
-  logs: string[];
-};
-
-const sortConversations = (conversations: Conversation[]) =>
-  [...conversations].sort(
-    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-  );
+}
 
 const Index = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string>();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [mode, setMode] = useState<"describe" | "troubleshoot">("describe");
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (!saved) return;
-
-    try {
-      const parsed = JSON.parse(saved) as Conversation[];
-      const normalised = parsed.map((conversation) => ({
-        id: conversation.id ?? uuid(),
-        title: conversation.title ?? "New Conversation",
-        updated_at: conversation.updated_at ?? new Date().toISOString(),
-        messages: (conversation.messages ?? []).map((message) => ({
-          id: message.id ?? uuid(),
-          role: message.role === "assistant" ? "assistant" : "user",
-          content: message.content ?? "",
-          timestamp: message.timestamp ?? new Date().toISOString(),
-          citations: message.citations,
-          guardrailWarnings: message.guardrailWarnings,
-          policies: message.policies,
-        })),
-        logs: conversation.logs ?? [],
-      }));
-
-      const sorted = sortConversations(normalised);
-      setConversations(sorted);
-      if (sorted.length > 0) {
-        setCurrentConversationId(sorted[0].id);
-        setMessages(sorted[0].messages);
-        setLogs(sorted[0].logs);
-      }
-    } catch (error) {
-      console.error("Failed to parse stored conversations", error);
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
+    loadConversations();
   }, []);
 
-  const persistConversations = (updater: (prev: Conversation[]) => Conversation[]) => {
-    setConversations((prev) => {
-      const next = sortConversations(updater(prev));
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      }
-      return next;
-    });
-  };
-
   useEffect(() => {
-    if (!currentConversationId) return;
-    const conversation = conversations.find((c) => c.id === currentConversationId);
-    if (conversation) {
-      setMessages(conversation.messages);
-      setLogs(conversation.logs);
+    if (currentConversationId) {
+      const conversation = conversations.find(c => c.id === currentConversationId);
+      if (conversation) {
+        setMessages(conversation.messages);
+      }
     }
   }, [currentConversationId, conversations]);
-
-  useEffect(() => {
-    if (!currentConversationId && conversations.length > 0) {
-      setCurrentConversationId(conversations[0].id);
-    }
-  }, [conversations, currentConversationId]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const loadConversations = () => {
+    const saved = localStorage.getItem('poliscope_conversations');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setConversations(parsed);
+      if (parsed.length > 0 && !currentConversationId) {
+        setCurrentConversationId(parsed[0].id);
+      }
+    }
+  };
+
+  const saveConversations = (convos: Conversation[]) => {
+    localStorage.setItem('poliscope_conversations', JSON.stringify(convos));
+    setConversations(convos);
+  };
+
   const createConversation = (): string => {
-    const conversation: Conversation = {
-      id: uuid(),
-      title: "New Conversation",
+    const newConversation: Conversation = {
+      id: crypto.randomUUID(),
+      title: 'New Conversation',
       updated_at: new Date().toISOString(),
       messages: [],
-      logs: [],
     };
-
-    persistConversations((prev) => [conversation, ...prev]);
-    setCurrentConversationId(conversation.id);
+    const updated = [newConversation, ...conversations];
+    saveConversations(updated);
+    setCurrentConversationId(newConversation.id);
     setMessages([]);
-    setLogs([]);
-    return conversation.id;
+    return newConversation.id;
   };
 
-  const updateConversation = (
-    conversationId: string,
-    transform: (conversation: Conversation) => Conversation
-  ) => {
-    persistConversations((prev) =>
-      prev.map((conversation) =>
-        conversation.id === conversationId ? transform(conversation) : conversation
-      )
+  const updateConversation = (conversationId: string, newMessages: Message[]) => {
+    const updated = conversations.map(c => 
+      c.id === conversationId 
+        ? { 
+            ...c, 
+            messages: newMessages,
+            title: newMessages[0]?.content.slice(0, 50) || 'New Conversation',
+            updated_at: new Date().toISOString(),
+          }
+        : c
     );
+    saveConversations(updated);
   };
 
-  const sendMessage = async (input: string) => {
-    const content = input.trim();
-    if (!content) return;
-
-    let conversationId = currentConversationId;
-    if (!conversationId) {
-      conversationId = createConversation();
+  const sendMessage = async (content: string) => {
+    let convId = currentConversationId;
+    if (!convId) {
+      convId = createConversation();
     }
 
-    if (!conversationId) return;
-
     setSending(true);
-
-    const userMessage: Message = {
-      id: uuid(),
-      role: "user",
-      content,
-      timestamp: new Date().toISOString(),
-    };
-
-    const withUser = [...messages, userMessage];
-    setMessages(withUser);
-    updateConversation(conversationId, (conversation) => ({
-      ...conversation,
-      messages: withUser,
-      title:
-        conversation.messages.length === 0
-          ? content.slice(0, 60) || "New Conversation"
-          : conversation.title,
-      updated_at: userMessage.timestamp,
-    }));
-
-    const assistantId = uuid();
-    const assistantPlaceholder: Message = {
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      timestamp: new Date().toISOString(),
-      isStreaming: true,
-    };
-
-    const withAssistant = [...withUser, assistantPlaceholder];
-    setMessages(withAssistant);
-    updateConversation(conversationId, (conversation) => ({
-      ...conversation,
-      messages: withAssistant,
-      updated_at: assistantPlaceholder.timestamp,
-    }));
-
     try {
-      const response = await sendChat(content);
+      const userMessage: Message = {
+        role: 'user',
+        content,
+        id: crypto.randomUUID(),
+      };
 
-      setMessages((prev) => {
-        const updated = prev.map((message) =>
-          message.id === assistantId
-            ? {
-                ...message,
-                content: response.answer.answer,
-                citations: response.answer.citations,
-                guardrailWarnings: response.guardrail.warnings,
-                policies: response.policies,
-                isStreaming: false,
-                timestamp: new Date().toISOString(),
-              }
-            : message
-        );
+      const newMessages = [...messages, userMessage];
+      setMessages(newMessages);
+      updateConversation(convId!, newMessages);
 
-        updateConversation(conversationId!, (conversation) => ({
-          ...conversation,
-          messages: updated,
-          logs: response.logs ?? [],
-          updated_at: new Date().toISOString(),
-        }));
-
-        setLogs(response.logs ?? []);
-        return updated;
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to contact the orchestrator.";
-
-      toast({
-        title: "Chat error",
-        description: message,
-        variant: "destructive",
+      const { data, error } = await supabase.functions.invoke('ai-chat', {
+        body: {
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          conversationId: convId,
+        },
       });
 
-      setMessages((prev) => {
-        const updated = prev.map((item) =>
-          item.id === assistantId
-            ? {
-                ...item,
-                content: `Sorry, something went wrong: ${message}`,
-                isStreaming: false,
-              }
-            : item
-        );
+      if (error) throw error;
 
-        updateConversation(conversationId!, (conversation) => ({
-          ...conversation,
-          messages: updated,
-          updated_at: new Date().toISOString(),
-        }));
-
-        return updated;
+      if (data?.content) {
+        const assistantMessage: Message = {
+          role: 'assistant',
+          content: data.content,
+          id: crypto.randomUUID(),
+        };
+        const finalMessages = [...newMessages, assistantMessage];
+        setMessages(finalMessages);
+        updateConversation(convId!, finalMessages);
+      }
+    } catch (error: any) {
+      toast({ 
+        title: "Error", 
+        description: error.message || "Failed to get response", 
+        variant: "destructive" 
       });
     } finally {
       setSending(false);
     }
   };
 
-  const activeConversation = useMemo(
-    () => conversations.find((conversation) => conversation.id === currentConversationId),
-    [conversations, currentConversationId]
-  );
-
   return (
-    <div className="flex h-[calc(100vh-56px)]">
+    <div className="flex h-screen">
       <div className="w-80 hidden md:block">
         <ConversationList
-          conversations={conversations.map(({ id, title, updated_at }) => ({
-            id,
-            title,
-            updated_at,
-          }))}
+          conversations={conversations}
           currentConversationId={currentConversationId}
           onSelectConversation={setCurrentConversationId}
           onNewConversation={createConversation}
@@ -291,26 +162,26 @@ const Index = () => {
                   Welcome to PoliScope
                 </h1>
                 <p className="text-lg text-muted-foreground">
-                  AI-powered legislative intelligence with cited sourcing
+                  AI-Powered Political Analysis & Policy Research
                 </p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
                 <div className="p-4 rounded-lg bg-card border border-border hover:border-primary/50 transition-all">
                   <h3 className="font-semibold mb-2">Policy Analysis</h3>
                   <p className="text-sm text-muted-foreground">
-                    Summaries, comparisons, and change tracking for bills across jurisdictions
+                    Get in-depth analysis of political policies and their impacts
                   </p>
                 </div>
                 <div className="p-4 rounded-lg bg-card border border-border hover:border-primary/50 transition-all">
-                  <h3 className="font-semibold mb-2">Grounded Answers</h3>
+                  <h3 className="font-semibold mb-2">Cited Sources</h3>
                   <p className="text-sm text-muted-foreground">
-                    Each response is linked to verifiable citations from the orchestrator stack
+                    All insights backed by verifiable sources and data
                   </p>
                 </div>
                 <div className="p-4 rounded-lg bg-card border border-border hover:border-primary/50 transition-all">
-                  <h3 className="font-semibold mb-2">Policy DNA</h3>
+                  <h3 className="font-semibold mb-2">Balanced Views</h3>
                   <p className="text-sm text-muted-foreground">
-                    Jump into transparency mode to inspect authorship, influence, and version history
+                    Objective analysis presenting multiple perspectives
                   </p>
                 </div>
               </div>
@@ -319,63 +190,22 @@ const Index = () => {
         ) : (
           <ScrollArea className="flex-1 p-6">
             <div className="max-w-4xl mx-auto space-y-6">
-              {activeConversation && (
-                <div className="text-sm text-muted-foreground">
-                  Conversation updated {new Date(activeConversation.updated_at).toLocaleString()}
-                </div>
-              )}
-              {messages.map((message) => (
-                <div key={message.id} className="space-y-3">
-                  <ChatMessage
-                    role={message.role}
-                    content={message.content}
-                    citations={message.citations?.map((citation) => ({
-                      title: citation.label,
-                      url: citation.url,
-                    }))}
-                    isStreaming={message.isStreaming}
-                    guardrailWarnings={message.guardrailWarnings}
-                  />
-                  {message.role === "assistant" &&
-                    !message.isStreaming &&
-                    message.policies &&
-                    message.policies.length > 0 && (
-                      <div className="grid gap-4">
-                        {message.policies.map((policy) => (
-                          <PolicyCard key={`${message.id}-${policy.billId}`} policy={policy} />
-                        ))}
-                      </div>
-                    )}
-                </div>
+              {messages.map((msg) => (
+                <ChatMessage key={msg.id} role={msg.role} content={msg.content} />
               ))}
-              {logs.length > 0 && (
-                <div className="rounded-lg border border-dashed border-border p-4 text-xs text-muted-foreground space-y-1">
-                  <p className="font-medium text-foreground">Orchestrator log</p>
-                  {logs.map((entry, index) => (
-                    <p key={index}>{entry}</p>
-                  ))}
-                </div>
-              )}
               <div ref={scrollRef} />
             </div>
           </ScrollArea>
         )}
 
-        <div className="border-t p-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="max-w-4xl mx-auto space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div className="space-y-1">
-                <div className="text-sm font-semibold">Search Legitimacy (Describe mode)</div>
-                <p className="text-xs text-muted-foreground">
-                  Evaluate a claim before sending it to the assistant for further analysis.
-                </p>
-              </div>
-              <ModeSelector mode={mode} onModeChange={setMode} />
-            </div>
-            <LegitimacyWidget />
-            <ChatInput onSendMessage={sendMessage} loading={sending} mode={mode} />
-          </div>
-        </div>
+<div className="border-t p-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+  <div className="max-w-4xl mx-auto grid gap-3">
+    <div className="text-sm font-semibold">Search Legitimacy (Describe mode)</div>
+    <LegitimacyWidget />
+    <ChatInput onSendMessage={sendMessage} loading={sending} />
+  </div>
+</div>
+
       </div>
     </div>
   );

@@ -6,16 +6,10 @@ import { Send, Loader2 } from "lucide-react";
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
   loading: boolean;
-  mode: "describe" | "troubleshoot";
 }
 
-const ChatInput = ({ onSendMessage, loading, mode }: ChatInputProps) => {
+const ChatInput = ({ onSendMessage, loading }: ChatInputProps) => {
   const [message, setMessage] = useState("");
-
-  const placeholder =
-    mode === "describe"
-      ? "Ask about a bill, policy, or legislative change..."
-      : "Need help finding something? Ask for search tips...";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +32,7 @@ const ChatInput = ({ onSendMessage, loading, mode }: ChatInputProps) => {
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={placeholder}
+        placeholder="Ask about political topics, policies, governance..."
         disabled={loading}
         className="min-h-[60px] max-h-[200px] resize-none"
         rows={2}
