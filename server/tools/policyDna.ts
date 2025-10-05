@@ -292,15 +292,33 @@ const buildBlameFromTimeline = (timeline: PolicyTimelineEntry[]): PolicyBlameEnt
 const mergeBlame = (...groups: PolicyBlameEntry[][]): PolicyBlameEntry[] => {
   const combined: PolicyBlameEntry[] = [];
   const seen = new Set<string>();
+  let fallbackCounter = 0;
+
   for (const group of groups) {
     for (const entry of group) {
-      const key = `${entry.sectionId}-${entry.heading ?? ""}-${entry.actionDate ?? ""}`;
+      const keyParts = [
+        entry.sectionId?.toLowerCase(),
+        entry.heading?.toLowerCase(),
+        entry.actionDate,
+        entry.author?.toLowerCase(),
+        entry.sourceUri,
+      ].filter((part): part is string => Boolean(part && part.trim()));
+
+      const key = keyParts.length ? keyParts.join("|") : `blame-${fallbackCounter}`;
+      fallbackCounter += keyParts.length ? 0 : 1;
       if (seen.has(key)) continue;
       seen.add(key);
       combined.push(entry);
     }
   }
-  return combined.slice(0, 20);
+
+  return combined
+    .sort((a, b) => {
+      const aTime = a.actionDate ? new Date(a.actionDate).getTime() : 0;
+      const bTime = b.actionDate ? new Date(b.actionDate).getTime() : 0;
+      return bTime - aTime;
+    })
+    .slice(0, 30);
 };
 
 const uniqueBy = <T>(items: T[], key: (item: T) => string | undefined): T[] => {
