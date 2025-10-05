@@ -41,6 +41,7 @@ export type PolicyTimelineEntry = {
   versionId: string;
   label: string;
   issuedOn?: string;
+  summary?: string;
   changeSummary?: {
     added: number;
     removed: number;

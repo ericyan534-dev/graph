@@ -282,25 +282,70 @@ const buildBlameFromTimeline = (timeline: PolicyTimelineEntry[]): PolicyBlameEnt
     author: idx === 0 ? "Introduced version" : "Revision",
     actionType: idx === 0 ? "Introduced" : "Updated version",
     actionDate: entry.issuedOn,
-    summary: entry.changeSummary
-      ? `Δ +${entry.changeSummary.added} / -${entry.changeSummary.removed} words`
-      : undefined,
+    summary:
+      entry.summary ??
+      (entry.changeSummary
+        ? `Δ +${entry.changeSummary.added} / -${entry.changeSummary.removed} words`
+        : undefined),
     sourceUri: entry.sourceUri,
   }));
+};
+
+const buildTimelineFromActions = (
+  actions: PolicyActionEvent[]
+): PolicyTimelineEntry[] => {
+  if (!actions.length) return [];
+
+  const uniqueActions = uniqueBy(
+    actions,
+    (action) =>
+      `${action.date ?? ""}|${action.type.toLowerCase()}|${
+        action.description ?? ""
+      }`
+  );
+
+  return uniqueActions.slice(0, 12).map((action, idx) => {
+    const actorSuffix = action.actor ? ` · ${action.actor}` : "";
+    return {
+      versionId: `action-${idx + 1}-${action.date ?? "undated"}`,
+      label: action.type ? `${action.type}${actorSuffix}` : `Action ${idx + 1}`,
+      issuedOn: action.date,
+      summary: action.description,
+      sourceUri: action.link,
+    } satisfies PolicyTimelineEntry;
+  });
 };
 
 const mergeBlame = (...groups: PolicyBlameEntry[][]): PolicyBlameEntry[] => {
   const combined: PolicyBlameEntry[] = [];
   const seen = new Set<string>();
+  let fallbackCounter = 0;
+
   for (const group of groups) {
     for (const entry of group) {
-      const key = `${entry.sectionId}-${entry.heading ?? ""}-${entry.actionDate ?? ""}`;
+      const keyParts = [
+        entry.sectionId?.toLowerCase(),
+        entry.heading?.toLowerCase(),
+        entry.actionDate,
+        entry.author?.toLowerCase(),
+        entry.sourceUri,
+      ].filter((part): part is string => Boolean(part && part.trim()));
+
+      const key = keyParts.length ? keyParts.join("|") : `blame-${fallbackCounter}`;
+      fallbackCounter += keyParts.length ? 0 : 1;
       if (seen.has(key)) continue;
       seen.add(key);
       combined.push(entry);
     }
   }
-  return combined.slice(0, 20);
+
+  return combined
+    .sort((a, b) => {
+      const aTime = a.actionDate ? new Date(a.actionDate).getTime() : 0;
+      const bTime = b.actionDate ? new Date(b.actionDate).getTime() : 0;
+      return bTime - aTime;
+    })
+    .slice(0, 30);
 };
 
 const uniqueBy = <T>(items: T[], key: (item: T) => string | undefined): T[] => {
@@ -466,18 +511,22 @@ export const policyDnaTool = async (billId: string): Promise<PolicyDNAResult> =>
     billNumber: locator.billNumber,
   };
 
-  const effectiveTimeline =
-    timeline.length > 0
-      ? timeline
-      : [
-          {
-            versionId: "introduced",
-            label: metadata.title ? `${metadata.title} (introduced)` : "Introduced version",
-            issuedOn: toStringValue(bill?.introducedDate) ?? toStringValue(bill?.introduced_on),
-            changeSummary: undefined,
-            sourceUri: toStringValue(bill?.url) ?? toStringValue(bill?.source),
-          },
-        ];
+  const actionTimelineFallback = buildTimelineFromActions(actions);
+
+  const effectiveTimeline = (() => {
+    if (timeline.length > 1) return timeline;
+    if (actionTimelineFallback.length > 0) return actionTimelineFallback;
+    return [
+      {
+        versionId: "introduced",
+        label: metadata.title ? `${metadata.title} (introduced)` : "Introduced version",
+        issuedOn: toStringValue(bill?.introducedDate) ?? toStringValue(bill?.introduced_on),
+        summary: toStringValue(bill?.latestAction?.text) ?? undefined,
+        changeSummary: undefined,
+        sourceUri: toStringValue(bill?.url) ?? toStringValue(bill?.source),
+      },
+    ];
+  })();
 
   const actionCandidates = uniqueBy(
     [
