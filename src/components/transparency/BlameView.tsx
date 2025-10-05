@@ -7,6 +7,35 @@ type BlameViewProps = {
   entries: PolicyBlameEntry[];
 };
 
+const buildSummary = (entry: PolicyBlameEntry) => {
+  if (entry.summary?.trim()) {
+    return entry.summary.trim();
+  }
+
+  const fragments: string[] = [];
+  if (entry.actionType) {
+    fragments.push(entry.actionType);
+  }
+  if (entry.author) {
+    fragments.push(`by ${entry.author}`);
+  }
+  if (entry.actionDate) {
+    fragments.push(
+      `on ${new Date(entry.actionDate).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })}`
+    );
+  }
+
+  if (fragments.length === 0) {
+    return "No additional details were returned for this clause.";
+  }
+
+  return fragments.join(" ");
+};
+
 export const BlameView = ({ entries }: BlameViewProps) => {
   if (entries.length === 0) {
     return (
@@ -18,8 +47,11 @@ export const BlameView = ({ entries }: BlameViewProps) => {
 
   return (
     <div className="space-y-3">
-      {entries.map((entry) => (
-        <Card key={entry.sectionId} className="border-border hover:border-primary/50 transition-colors">
+      {entries.map((entry, index) => (
+        <Card
+          key={`${entry.sectionId ?? "section"}-${entry.heading ?? index}`}
+          className="border-border hover:border-primary/50 transition-colors"
+        >
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
               <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
@@ -40,9 +72,7 @@ export const BlameView = ({ entries }: BlameViewProps) => {
                   )}
                 </div>
 
-                {entry.summary && (
-                  <p className="text-sm text-foreground italic">"{entry.summary}"</p>
-                )}
+                <p className="text-sm text-foreground italic">{buildSummary(entry)}</p>
 
                 <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                   {entry.author && (
@@ -52,7 +82,9 @@ export const BlameView = ({ entries }: BlameViewProps) => {
                     </div>
                   )}
                   {entry.actionType && <span>{entry.actionType}</span>}
-                  {entry.actionDate && <span>{new Date(entry.actionDate).toLocaleDateString()}</span>}
+                  {entry.actionDate && (
+                    <span>{new Date(entry.actionDate).toLocaleDateString()}</span>
+                  )}
                   {entry.sourceUri && (
                     <a
                       href={entry.sourceUri}
