@@ -1,24 +1,21 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, DollarSign, FileText, GitBranch, Users } from "lucide-react";
-
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowLeft, GitBranch, Users, DollarSign, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { BlameView } from "@/components/transparency/BlameView";
-import { HistoryPanel } from "@/components/transparency/HistoryPanel";
-import { InfluenceOverlay } from "@/components/transparency/InfluenceOverlay";
-import { PolicyChatPanel } from "@/components/transparency/PolicyChatPanel";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VersionTimeline } from "@/components/transparency/VersionTimeline";
+import { BlameView } from "@/components/transparency/BlameView";
+import { InfluenceOverlay } from "@/components/transparency/InfluenceOverlay";
+import { HistoryPanel } from "@/components/transparency/HistoryPanel";
+import { PolicyChatPanel } from "@/components/transparency/PolicyChatPanel";
 import { fetchPolicyDetail } from "@/lib/api";
 
 const TransparencyGraph = () => {
-  const { id } = useParams<{ id?: string }>();
+  const { id } = useParams();
   const navigate = useNavigate();
-  const billId = id ?? "";
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined);
+  const billId = id ?? "";
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["policy-detail", billId],
@@ -33,138 +30,107 @@ const TransparencyGraph = () => {
   const influence = data?.influence;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)]">
-      <ScrollArea className="flex-1">
-        <div className="mx-auto max-w-6xl space-y-6 p-4">
+    <div className="min-h-screen bg-background">
+      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
               size="icon"
               onClick={() => navigate("/")}
               className="rounded-full"
-              aria-label="Back to chat"
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div>
-              <h1 className="text-2xl font-semibold leading-tight">
-                {metadata?.title ?? (billId ? `Policy ${billId}` : "Transparency Graph")}
+              <h1 className="text-xl font-semibold text-foreground">
+                {metadata?.title ?? id}
               </h1>
               <p className="text-sm text-muted-foreground">
-                Legislative DNA, authorship, and influence mapping
+                Transparency Graph
               </p>
               {metadata?.sponsor?.name && (
                 <p className="text-xs text-muted-foreground">
                   Sponsor: {metadata.sponsor.name}
-                  {metadata.sponsor.party && ` (${metadata.sponsor.party}`}
-                  {metadata.sponsor.state && ` · ${metadata.sponsor.state}`}
-                  {metadata.sponsor.party && ")"}
+                  {metadata.sponsor.party && ` (${metadata.sponsor.party})`}
                 </p>
               )}
             </div>
           </div>
-
-          {!billId ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Select a policy</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-muted-foreground">
-                <p>
-                  Choose a bill from the chat recommendations to explore its version history, clause authorship,
-                  and influence data.
-                </p>
-                <p>Once selected, this page will surface live policy DNA powered by the orchestrator APIs.</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-6">
-              {isLoading && (
-                <Card>
-                  <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                    Loading transparency data…
-                  </CardContent>
-                </Card>
-              )}
-
-              {isError && (
-                <Card>
-                  <CardContent className="py-12 text-center text-sm text-destructive">
-                    {(error as Error)?.message ?? "Unable to load policy detail."}
-                  </CardContent>
-                </Card>
-              )}
-
-              {!isLoading && !isError && data && (
-                <div className="grid gap-6 lg:grid-cols-3">
-                  <div className="space-y-6 lg:col-span-2">
-                    <Card>
-                      <CardHeader className="flex flex-row items-center gap-3">
-                        <GitBranch className="h-5 w-5 text-primary" />
-                        <CardTitle>Version Timeline</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <VersionTimeline
-                          versions={timeline}
-                          selectedVersion={selectedVersion ?? timeline[0]?.versionId}
-                          onVersionSelect={setSelectedVersion}
-                        />
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardHeader className="flex flex-row items-center gap-3">
-                        <FileText className="h-5 w-5 text-primary" />
-                        <CardTitle>Clause Attribution</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <BlameView entries={blame} />
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  <div className="space-y-6">
-                    <PolicyChatPanel billId={billId} metadata={metadata} />
-
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Influence Overlay</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <Tabs defaultValue="lobbying" className="w-full">
-                          <TabsList className="mb-4 grid w-full grid-cols-2">
-                            <TabsTrigger value="lobbying" className="gap-2">
-                              <DollarSign className="h-4 w-4" /> Lobbying
-                            </TabsTrigger>
-                            <TabsTrigger value="finance" className="gap-2">
-                              <Users className="h-4 w-4" /> Finance
-                            </TabsTrigger>
-                          </TabsList>
-                          <TabsContent value="lobbying">
-                            <InfluenceOverlay influence={influence} mode="lobbying" />
-                          </TabsContent>
-                          <TabsContent value="finance">
-                            <InfluenceOverlay influence={influence} mode="finance" />
-                          </TabsContent>
-                        </Tabs>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Commitments &amp; History</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <HistoryPanel actions={actions} />
-                      </CardContent>
-                    </Card>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
-      </ScrollArea>
+      </header>
+
+      <main className="container mx-auto px-4 py-6">
+        {isLoading && (
+          <div className="text-sm text-muted-foreground">Loading policy detail…</div>
+        )}
+        {isError && (
+          <div className="text-sm text-destructive">
+            {(error as Error)?.message ?? "Failed to load policy detail."}
+          </div>
+        )}
+        {!isLoading && !isError && data && (
+          <div className="grid lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              <div className="bg-card rounded-xl border border-border p-6 shadow-medium">
+                <div className="flex items-center gap-2 mb-4">
+                  <GitBranch className="h-5 w-5 text-primary" />
+                  <h2 className="text-lg font-semibold text-foreground">
+                    Version Timeline
+                  </h2>
+                </div>
+                <VersionTimeline
+                  versions={timeline}
+                  selectedVersion={selectedVersion ?? timeline[0]?.versionId}
+                  onVersionSelect={setSelectedVersion}
+                />
+              </div>
+
+              <div className="bg-card rounded-xl border border-border p-6 shadow-medium">
+                <div className="flex items-center gap-2 mb-4">
+                  <FileText className="h-5 w-5 text-primary" />
+                  <h2 className="text-lg font-semibold text-foreground">
+                    Clause Attribution
+                  </h2>
+                </div>
+                <BlameView entries={blame} />
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <PolicyChatPanel billId={billId} metadata={metadata} />
+
+              <div className="bg-card rounded-xl border border-border p-6 shadow-medium">
+                <Tabs defaultValue="lobbying" className="w-full">
+                  <TabsList className="w-full grid grid-cols-2 mb-4">
+                    <TabsTrigger value="lobbying" className="gap-2">
+                      <DollarSign className="h-4 w-4" />
+                      Lobbying
+                    </TabsTrigger>
+                    <TabsTrigger value="finance" className="gap-2">
+                      <Users className="h-4 w-4" />
+                      Finance
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="lobbying">
+                    <InfluenceOverlay influence={influence} mode="lobbying" />
+                  </TabsContent>
+                  <TabsContent value="finance">
+                    <InfluenceOverlay influence={influence} mode="finance" />
+                  </TabsContent>
+                </Tabs>
+              </div>
+
+              <div className="bg-card rounded-xl border border-border p-6 shadow-medium">
+                <h2 className="text-lg font-semibold text-foreground mb-4">
+                  Commitments & History
+                </h2>
+                <HistoryPanel actions={actions} />
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
     </div>
   );
 };
