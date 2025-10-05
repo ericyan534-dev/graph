@@ -10,21 +10,28 @@ const DNAPage = () => {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="container mx-auto flex items-center gap-4 px-4 py-4">
-          <Link to="/">
-            <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              Back to Chat
-            </Button>
-          </Link>
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold">Policy DNA Analysis</h1>
-            {billId && <Badge variant="outline">Bill {billId}</Badge>}
+        <div className="container mx-auto max-w-4xl px-4 py-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <Link to="/">
+              <Button variant="ghost" size="sm" className="gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Back to Chat
+              </Button>
+            </Link>
+            <div className="h-6 w-px bg-border" />
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-lg font-bold">Policy DNA Analysis</h1>
+              {billId && (
+                <Badge variant="outline" className="font-mono">
+                  Bill {billId}
+                </Badge>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto max-w-4xl px-4 py-8">
         <PolicyDNA />
       </main>
     </div>
