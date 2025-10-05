@@ -4,7 +4,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
-import Chat from "./pages/Chat";
+import Index from "./pages/Index";
+import DNAPage from "./pages/DNAPage";
+import InfluencePage from "./pages/InfluencePage";
+import About from "./pages/About";
 import TransparencyGraph from "./pages/TransparencyGraph";
 import NotFound from "./pages/NotFound";
 
@@ -18,7 +21,16 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Chat />} />
+            <Route path="/" element={<Index />} />
+            <Route path="/dna">
+              <Route index element={<DNAPage />} />
+              <Route path=":billId" element={<DNAPage />} />
+            </Route>
+            <Route path="/influence">
+              <Route index element={<InfluencePage />} />
+              <Route path=":billId" element={<InfluencePage />} />
+            </Route>
+            <Route path="/about" element={<About />} />
             <Route path="/transparency/:id" element={<TransparencyGraph />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

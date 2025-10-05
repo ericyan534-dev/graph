@@ -100,7 +100,7 @@ const TransparencyGraph = () => {
             <div className="space-y-6">
               <PolicyChatPanel billId={billId} metadata={metadata} />
 
-              <div className="bg-card rounded-xl border border-border p-6 shadow-medium">
+              <div id="influence" className="bg-card rounded-xl border border-border p-6 shadow-medium">
                 <Tabs defaultValue="lobbying" className="w-full">
                   <TabsList className="w-full grid grid-cols-2 mb-4">
                     <TabsTrigger value="lobbying" className="gap-2">
