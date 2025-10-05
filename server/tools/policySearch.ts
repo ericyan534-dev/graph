@@ -25,7 +25,7 @@ const MAX_RESULTS = Number.parseInt(
   10
 );
 const MAX_HITS = Number.parseInt(
-  process.env.POLICY_SEARCH_MAX_HITS ?? "5",
+  process.env.POLICY_SEARCH_MAX_HITS ?? "10",
   10
 );
 const MIN_RELEVANCE = Number.parseFloat(
@@ -35,6 +35,159 @@ const MAX_PAGES = Number.parseInt(
   process.env.CONGRESS_MAX_PAGES ?? "6",
   10
 );
+
+const STOPWORDS = new Set(
+  [
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "but",
+    "by",
+    "can",
+    "could",
+    "did",
+    "doing",
+    "done",
+    "do",
+    "for",
+    "from",
+    "get",
+    "gets",
+    "getting",
+    "give",
+    "given",
+    "gonna",
+    "got",
+    "he",
+    "her",
+    "here",
+    "hers",
+    "had",
+    "has",
+    "have",
+    "having",
+    "him",
+    "his",
+    "how",
+    "help",
+    "hey",
+    "hi",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "just",
+    "know",
+    "knows",
+    "like",
+    "make",
+    "makes",
+    "making",
+    "me",
+    "mine",
+    "more",
+    "most",
+    "my",
+    "need",
+    "needs",
+    "please",
+    "really",
+    "say",
+    "says",
+    "saying",
+    "tell",
+    "telling",
+    "thanks",
+    "thank",
+    "think",
+    "thinking",
+    "try",
+    "trying",
+    "want",
+    "wants",
+    "would",
+    "you",
+    "your",
+    "yours",
+    "of",
+    "on",
+    "or",
+    "our",
+    "ours",
+    "she",
+    "should",
+    "so",
+    "than",
+    "that",
+    "the",
+    "their",
+    "theirs",
+    "them",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "to",
+    "too",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "whom",
+    "why",
+    "will",
+    "with",
+  ].map((word) => word.toLowerCase())
+);
+
+const HIGH_SIGNAL_SHORT_TOKENS = new Set(
+  [
+    "aca",
+    "ada",
+    "cdc",
+    "cia",
+    "ciaa",
+    "dod",
+    "doe",
+    "doj",
+    "dot",
+    "epa",
+    "fcc",
+    "fda",
+    "fisa",
+    "fmla",
+    "gsa",
+    "irs",
+    "med",
+    "nasa",
+    "nra",
+    "nsa",
+    "osha",
+    "sec",
+    "tsa",
+    "usc",
+    "va",
+    "vawa",
+    "wto",
+    "tax",
+  ].map((token) => token.toLowerCase())
+);
+
+const isHighSignalToken = (token: string) =>
+  token.length >= 4 || /\d/.test(token) || HIGH_SIGNAL_SHORT_TOKENS.has(token);
 
 const BILL_PATTERN = /(?:(\d{3})[a-zA-Z]{0,2}\s*)?(h\.?r\.|s\.|s\.?j\.?res\.|h\.?j\.?res\.|s\.?con\.?res\.|h\.?con\.?res\.|s\.?res\.|h\.?res\.)\s*(\d{1,4})/i;
 
@@ -165,13 +318,74 @@ const normalizeToken = (token: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, "")
     .trim();
 
+const expandToken = (token: string): Set<string> => {
+  const variants = new Set<string>();
+  if (!token) return variants;
+  variants.add(token);
+
+  const push = (candidate: string | undefined) => {
+    if (!candidate) return;
+    const normalized = normalizeToken(candidate);
+    if (normalized.length > 1) {
+      variants.add(normalized);
+    }
+  };
+
+  if (token.endsWith("es")) {
+    push(token.slice(0, -2));
+  }
+  if (token.endsWith("s")) {
+    push(token.slice(0, -1));
+  }
+  if (token.endsWith("ing")) {
+    push(token.slice(0, -3));
+  }
+  if (token.endsWith("ed")) {
+    push(token.slice(0, -2));
+  }
+  if (token.endsWith("ation")) {
+    push(token.slice(0, -5));
+  }
+  if (token.endsWith("ment")) {
+    push(token.slice(0, -4));
+  }
+  if (token.endsWith("al")) {
+    push(token.slice(0, -2));
+  }
+
+  return variants;
+};
+
+const buildTokenIndex = (tokens: string[]): Set<string> => {
+  const expanded = new Set<string>();
+  tokens.forEach((token) => {
+    expandToken(token).forEach((variant) => expanded.add(variant));
+  });
+  return expanded;
+};
+
 const tokenize = (value: string | undefined) => {
   if (!value) return [] as string[];
   return value
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .map((piece) => normalizeToken(piece))
-    .filter((piece): piece is string => Boolean(piece && piece.length > 1));
+    .filter(
+      (piece): piece is string =>
+        Boolean(piece && piece.length > 1 && !STOPWORDS.has(piece))
+    );
+};
+
+const tokenMatches = (candidate: string, searchTokens: Set<string>) => {
+  if (searchTokens.has(candidate)) return true;
+  for (const variant of expandToken(candidate)) {
+    if (searchTokens.has(variant)) return true;
+  }
+  for (const search of searchTokens) {
+    if (search.length >= 3 && candidate.startsWith(search)) return true;
+    if (candidate.length >= 3 && search.startsWith(candidate)) return true;
+  }
+  return false;
 };
 
 const extractSections = (bill: UnknownRecord): PolicySectionHit[] => {
@@ -269,16 +483,57 @@ const computeRelevanceScore = (
 ) => {
   const combinedTokens = new Set<string>([...queryTokens, ...keywordTokens]);
   if (combinedTokens.size === 0) {
-    return hit.summary ? 0.4 : 0.2;
+    return 0;
+  }
+
+  const signalTokens = Array.from(combinedTokens).filter(
+    (token) =>
+      token.length >= 4 ||
+      /\d/.test(token) ||
+      HIGH_SIGNAL_SHORT_TOKENS.has(token)
+  );
+
+  if (signalTokens.length === 0) {
+    return 0;
   }
 
   const haystacks: Array<[string | undefined, number]> = [
-    [hit.title, 4],
-    [hit.summary, 3],
-    [hit.latestAction, 2],
-    [hit.sections.map((section) => section.snippet).join(" "), 1.5],
+    [hit.title, 6],
+    [hit.summary, 5],
+    [hit.latestAction, 3],
+    [hit.sections.map((section) => section.snippet).join(" "), 2],
     [hit.sponsor?.name, 1],
   ];
+
+  let matchedWeight = 0;
+  let totalWeight = 0;
+  let matchedFields = 0;
+  const matchedTokens = new Set<string>();
+
+  for (const [text, weight] of haystacks) {
+    if (!text) {
+      continue;
+    }
+    totalWeight += weight;
+    const tokens = tokenize(text);
+    if (!tokens.length) continue;
+    const fieldTokens = new Set(tokens);
+    const fieldMatches = Array.from(fieldTokens).filter((token) =>
+      tokenMatches(token, combinedTokens)
+    );
+    if (fieldMatches.length === 0) {
+      continue;
+    }
+    matchedFields += 1;
+    fieldMatches.forEach((token) => matchedTokens.add(token));
+    matchedWeight += weight * (fieldMatches.length / Math.max(1, fieldTokens.size));
+  }
+
+  if (matchedTokens.size === 0 || matchedWeight === 0 || totalWeight === 0) {
+    return 0;
+  }
+
+  let score = matchedWeight / totalWeight;
 
   const aliasTokens = buildBillAliasTokens(hit);
   const aliasMatches = Array.from(aliasTokens).filter((alias) =>
@@ -287,21 +542,20 @@ const computeRelevanceScore = (
       typeof text === "string" && text.toLowerCase().includes(alias)
     )
   );
-
-  let score = aliasMatches.length > 0 ? 0.45 : 0;
-
-  for (const [text, weight] of haystacks) {
-    if (!text) continue;
-    const tokens = tokenize(text);
-    for (const token of tokens) {
-      if (combinedTokens.has(token)) {
-        score += 0.1 * weight;
-      }
-    }
+  if (aliasMatches.length > 0) {
+    score += 0.15;
   }
 
-  const keywordBoost = keywordTokens.size > 0 ? 0.05 * keywordTokens.size : 0;
-  score += keywordBoost;
+  const coverage = matchedFields / haystacks.length;
+  score = score * 0.7 + coverage * 0.3;
+
+  if (matchedTokens.size >= signalTokens.length) {
+    score += 0.1;
+  }
+
+  if (signalTokens.length === 1 && matchedTokens.size === 1) {
+    score *= 0.85;
+  }
 
   return Math.min(0.99, score);
 };
@@ -415,6 +669,18 @@ export const policySearchTool = async ({
   query,
   filters,
 }: SearchInput): Promise<PolicySearchHit[]> => {
+  const queryTokensRaw = tokenize(query);
+  const keywordTokensRaw = (filters?.keywords ?? []).flatMap((keyword) =>
+    tokenize(keyword)
+  );
+  const hasSignalTokens =
+    queryTokensRaw.some(isHighSignalToken) ||
+    keywordTokensRaw.some(isHighSignalToken);
+
+  if (!hasSignalTokens) {
+    return [];
+  }
+
   if (filters?.billId) {
     const locator = parseBillId(filters.billId);
     if (locator) {
@@ -455,10 +721,8 @@ export const policySearchTool = async ({
     }
   }
 
-  const queryTokens = new Set(tokenize(query));
-  const keywordTokens = new Set(
-    (filters?.keywords ?? []).flatMap((keyword) => tokenize(keyword))
-  );
+  const queryTokens = buildTokenIndex(queryTokensRaw);
+  const keywordTokens = buildTokenIndex(keywordTokensRaw);
 
   const scored = aggregated
     .map((hit) => {
@@ -466,10 +730,11 @@ export const policySearchTool = async ({
       return { hit, relevance };
     })
     .filter(({ relevance }) => relevance >= MIN_RELEVANCE)
-    .sort((a, b) => b.relevance - a.relevance)
-    .slice(0, Math.max(1, MAX_HITS));
+    .sort((a, b) => b.relevance - a.relevance);
 
-  return scored.map(({ hit, relevance }, index, list) => ({
+  const limited = scored.slice(0, Math.max(0, Math.min(MAX_HITS, scored.length)));
+
+  return limited.map(({ hit, relevance }, index, list) => ({
     ...hit,
     confidence:
       Math.max(
